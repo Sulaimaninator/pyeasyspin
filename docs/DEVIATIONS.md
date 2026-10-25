@@ -181,6 +181,12 @@ purpose:
   keyword (a NumPy Generator or RandomState; default the global stream) and agree with EasySpin
   statistically, not draw for draw. NumPy cannot reproduce MATLAB's randn, randi or randperm
   streams.
+- **Multicore.** `esfit` computes the model points its algorithms will need (swarm particles, a
+  generation, grid blocks, Jacobian steps, the simplex candidates) on worker processes, and the
+  algorithm then uses them in its usual order, so fits give the same numbers as serial ones.
+  `Opt.maxTime` counts the CPU time of the main process and its workers, as MATLAB's cputime
+  counts all of MATLAB's threads. With Monte Carlo, trial points are drawn in batches in the usual
+  order, so after an early stop the random stream has advanced past the last trial used.
 - **`chili` diagnostics** (`Opt.Diagnostics`) are stored in `pyeasyspin.fn.chili.DIAGNOSTICS[name]`
   instead of the MATLAB base workspace.
 - **Files.** `getmatrix` maps MATLAB fread precisions to NumPy types (MATLAB-only types such as

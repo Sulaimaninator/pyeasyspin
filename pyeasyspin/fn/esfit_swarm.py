@@ -1,11 +1,11 @@
 """Particle swarm optimization for least-squares fitting"""
-import time
 
 import numpy as np
 
 from .._registry import F, nout
 from .._struct import Struct
 from .._mat import isempty
+from .._parallel import prefetch, cpu_time
 
 
 def _call(fcn, x):
@@ -59,7 +59,7 @@ def esfit_swarm(fcn=None, lb=None, ub=None, FitOpt=None, rng=None):
     bestF = np.full(nParticles, np.inf)
     Fv = np.full(nParticles, np.inf)
     globalbestF = np.inf
-    startTime = time.process_time()
+    startTime = cpu_time()
     nStalledIterations = 0
     if FitOpt.Verbosity:
         FitOpt.InfoPrintFunction('Starting iterations...')
@@ -70,6 +70,7 @@ def esfit_swarm(fcn=None, lb=None, ub=None, FitOpt=None, rng=None):
     info = Struct()
     while stopCode == 0:
         iIteration += 1
+        prefetch(fcn, [X[:, p].copy() for p in range(nParticles)])     # all particles at once
         for p in range(nParticles):
             Fv[p], UserStop = _call(fcn, X[:, p].copy())
             if UserStop:
@@ -95,7 +96,7 @@ def esfit_swarm(fcn=None, lb=None, ub=None, FitOpt=None, rng=None):
         if FitOpt.Verbosity:
             FitOpt.IterationPrintFunction('  Iteration %4d:   value %0.5e  best so far (%d)'
                                           % (iIteration, globalbestF, nStalledIterations))
-        elapsedTime = (time.process_time() - startTime) / 60
+        elapsedTime = (cpu_time() - startTime) / 60
         if elapsedTime > FitOpt.maxTime:
             stopCode = 1
         if globalbestF < FitOpt.TolFun:

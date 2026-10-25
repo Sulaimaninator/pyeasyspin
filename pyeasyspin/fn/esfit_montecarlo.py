@@ -1,11 +1,11 @@
 """Monte Carlo algorithm for least-squares fitting"""
-import time
 
 import numpy as np
 
 from .._registry import F, nout
 from .._struct import Struct
 from .._mat import isempty
+from .._parallel import prefetch, batch_size, cpu_time
 
 
 def _call(fcn, x):
@@ -36,13 +36,24 @@ def esfit_montecarlo(fcn=None, lb=None, ub=None, FitOpt=None, rng=None):
     nParams = lb.size
     Fmin = np.inf
     bestx = np.zeros(nParams)
-    startTime = time.process_time()
+    startTime = cpu_time()
     stopCode = 0
     elapsedTime = 0.0
     info = Struct()
     iTrial = 0
-    for iTrial in range(1, int(FitOpt.nTrials) + 1):
-        X = lb + (ub - lb) * src.random(nParams)
+    nTrials = int(FitOpt.nTrials)
+    B = batch_size(fcn)
+    pending = []
+    for iTrial in range(1, nTrials + 1):
+        if B > 1:
+            # Draw the next B trial points in the usual order and evaluate them at once (after an
+            # early stop the random stream has advanced past the last trial used).
+            if not pending:
+                pending = [lb + (ub - lb) * src.random(nParams) for _ in range(min(B, nTrials - iTrial + 1))]
+                prefetch(fcn, pending)
+            X = pending.pop(0)
+        else:
+            X = lb + (ub - lb) * src.random(nParams)
         Fv = _call(fcn, X)
         newbest = Fv < Fmin
         if newbest:
@@ -58,7 +69,7 @@ def esfit_montecarlo(fcn=None, lb=None, ub=None, FitOpt=None, rng=None):
         UserStop = bool(FitOpt.IterFcn(info)) if not isempty(FitOpt.IterFcn) else False
         if UserStop:
             stopCode = 2
-        elapsedTime = (time.process_time() - startTime) / 60
+        elapsedTime = (cpu_time() - startTime) / 60
         if elapsedTime > FitOpt.maxTime:
             stopCode = 1
         if Fv < FitOpt.TolFun:

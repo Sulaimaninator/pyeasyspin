@@ -10,10 +10,18 @@ if not log.handlers:
 
 
 class _Config:
-    """EasySpinLogLevel -> config.LogLevel (None = logging off, as an empty global in MATLAB)."""
+    """EasySpinLogLevel -> config.LogLevel (None = logging off, as an empty global in MATLAB).
+
+    Multicore settings (see pyeasyspin/_parallel.py):
+      Workers          worker processes for independent simulations; 'auto' = all cores, 1 = serial
+      BLASThreads      BLAS threads inside a pyeasyspin call; None = library default
+      ParallelMinTime  seconds a batch must take serially before it goes to the worker pool"""
 
     def __init__(self):
         self.LogLevel = None
+        self.Workers = 'auto'
+        self.BLASThreads = 1
+        self.ParallelMinTime = 0.2
 
 
 config = _Config()

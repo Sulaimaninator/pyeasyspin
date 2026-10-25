@@ -5,6 +5,7 @@ from scipy.linalg import solve_triangular
 
 from .._registry import F, nout
 from .._mat import isempty
+from .._parallel import prefetch
 
 
 def _call(fun, x):
@@ -78,6 +79,7 @@ def jacobianest(fun=None, x0=None, MaxRelStep=None, lb=None, ub=None):
     jac = np.zeros((n, nx), dtype=f0.dtype if np.iscomplexobj(f0) else float)
     err = np.zeros((n, nx))
     x0flat = x0.reshape(-1, order='F')
+    stencils = []
     for i in range(nx):
         relativedelta = MaxRelStep[i] * steps
         x0_i = x0flat[i]
@@ -90,6 +92,16 @@ def jacobianest(fun=None, x0=None, MaxRelStep=None, lb=None, ub=None):
             if room_lo < dmax or room_hi < dmax:
                 side, room = (1, room_hi) if room_hi >= room_lo else (-1, room_lo)
                 delta = np.abs(delta) * (min(room, dmax) / dmax)
+        stencils.append((x0_i, delta, side))
+    for i in range(nx):
+        x0_i, delta, side = stencils[i]
+        pts = []                                     # this parameter's stencil, evaluated at once
+        for j in range(nsteps):
+            if side == 0:
+                pts += [_swapelement(x0, i, x0_i + delta[j]), _swapelement(x0, i, x0_i - delta[j])]
+            else:
+                pts.append(_swapelement(x0, i, x0_i + side * delta[j]))
+        prefetch(fun, pts)
         fdel = np.zeros((n, nsteps), dtype=jac.dtype)
         for j in range(nsteps):
             if side == 0:

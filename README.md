@@ -41,6 +41,43 @@ B, spc = es.pepper(Sys, Exp)              # field axis (mT) and first-derivative
 B, spc = es.pepper(Sys, Exp, plot=True)   # the same, plotted with Matplotlib
 ```
 
+## Speed
+
+A single simulation runs at about the speed of EasySpin in MATLAB (median of five calls, Intel
+Core i7-1255U laptop):
+
+| | EasySpin 6.0.12 | pyeasyspin |
+|---|---|---|
+| Nitroxide powder (`pepper`) | 0.25 s | 0.13 s |
+| Cu(II) powder (`pepper`) | 0.047 s | 0.035 s |
+| Mn(II), S = 5/2 (`pepper`) | 0.23 s | 0.26 s |
+| Three-pulse ESEEM (`saffron`) | 0.043 s | 0.019 s |
+| Nitroxide, slow motion (`chili`) | 0.19 s | 0.58 s |
+
+Work that consists of many independent simulations runs on all CPU cores, with no extra toolbox:
+
+- `esfit` computes the model points of each step in parallel (the particles of a swarm iteration,
+  a genetic generation, grid points, finite-difference Jacobians, simplex candidates). The fit
+  follows the same path and gives the same numbers as a serial run.
+- `pepper` splits large orientation grids across cores.
+- `pyeasyspin.parallel_map` runs any batch of simulations, such as a parameter scan.
+
+Fitting a Cu(II) powder spectrum (7 parameters; the same data, starting point and settings), on
+the same laptop:
+
+| | EasySpin 6.0.12 | pyeasyspin, 1 core | pyeasyspin, all cores |
+|---|---|---|---|
+| Levenberg–Marquardt | 125 s | 126 s | 38 s |
+| Particle swarm, 20 particles | 2186 s | | 692 s |
+
+Both fits end at EasySpin's result: the rmsd agrees to six digits, and the fitted parameters agree
+to 2e-6 (Levenberg–Marquardt) and 4e-11 (swarm, which followed EasySpin's random-number path). The
+speed-up depends on the number of cores.
+
+`pyeasyspin.config.Workers` sets the number of worker processes (`'auto'`, the default, uses all
+cores; `1` turns parallel evaluation off). The first parallel call starts the workers, which takes
+a few seconds; later calls reuse them.
+
 ## What is included
 
 All of EasySpin's simulation and analysis functions:

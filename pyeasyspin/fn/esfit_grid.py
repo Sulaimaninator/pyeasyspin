@@ -1,11 +1,11 @@
 """Function minimization using grid search"""
-import time
 
 import numpy as np
 
 from .._registry import F, nout
 from .._struct import Struct
 from .._mat import isempty
+from .._parallel import prefetch, batch_size, cpu_time
 
 
 def _call(fcn, x):
@@ -55,12 +55,15 @@ def esfit_grid(fcn=None, lb=None, ub=None, FitOpt=None, rng=None):
         X = X[:, (np.random if rng is None else rng).permutation(nGridPoints)]
     minF = np.inf
     bestx = np.full(nParams, np.nan)
-    startTime = time.process_time()
+    startTime = cpu_time()
     stopCode = 0
     nEvals = 0
     iIteration = 0
     info = Struct()
+    B = batch_size(fcn)
     for idx in range(nGridPoints):
+        if B > 1 and idx % B == 0:                  # the next B grid points at once
+            prefetch(fcn, [X[:, j].copy() for j in range(idx, min(idx + B, nGridPoints))])
         Fv = _call(fcn, X[:, idx].copy())
         nEvals += 1
         iIteration += 1
@@ -79,7 +82,7 @@ def esfit_grid(fcn=None, lb=None, ub=None, FitOpt=None, rng=None):
         info.iter = iIteration
         info.newbest = newbest
         UserStop = bool(FitOpt.IterFcn(info)) if not isempty(FitOpt.IterFcn) else False
-        elapsedTime = (time.process_time() - startTime) / 60
+        elapsedTime = (cpu_time() - startTime) / 60
         if elapsedTime > FitOpt.maxTime:
             stopCode = 1
         if UserStop:

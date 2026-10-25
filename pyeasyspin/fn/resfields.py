@@ -4,6 +4,7 @@ import itertools
 import numpy as np
 
 from .._registry import F, nout
+from .._parallel import chunked
 from .._struct import Struct
 from .._mat import a2, vec, isempty, numel, isnumeric
 from ..config import config
@@ -37,6 +38,78 @@ def _eigvec(H):
     """MATLAB [V,E] = eig(H) for a Hermitian H: ascending energies, vectors as columns."""
     E, V = np.linalg.eigh(H)
     return V, E
+
+
+def _merge_orientation_chunks(chunks, nTransitions, nOrientations):
+    """Combine the results of the orientation loop run on consecutive chunks of orientations.
+
+    Each chunk holds idxTr (row -> transition, without the inf sentinel) and arrays with one
+    column per orientation of the chunk. In the serial loop, row k of transition t holds the k-th
+    resonance of t at every orientation; rows k > 1 are inserted when the first orientation has
+    a k-th resonance. Rows are therefore keyed by (t, k), ordered by t and then k, and a missing
+    entry takes the value the serial loop would leave there: the initial value of the array for
+    k = 1 rows (NaN, but 0 for Gdat and the perturbation-nucleus arrays) and the inserted value
+    for k > 1 rows (NaN, but 0 for the perturbation-nucleus arrays)."""
+    kmax = np.ones(nTransitions + 1, dtype=int)
+    keys_c = []
+    for c in chunks:
+        t = np.asarray(c['idxTr'], dtype=int)
+        k = np.zeros(t.size, dtype=int)
+        seen = {}
+        for r, tt in enumerate(t):
+            seen[tt] = seen.get(tt, 0) + 1
+            k[r] = seen[tt]
+            kmax[tt] = max(kmax[tt], k[r])
+        keys_c.append((t, k))
+    row_of = {}
+    idxTr = []
+    for tt in range(1, nTransitions + 1):
+        for kk in range(1, kmax[tt] + 1):
+            row_of[(tt, kk)] = len(idxTr)
+            idxTr.append(tt)
+    nRows = len(idxTr)
+    first = np.array([kk == 1 for tt in range(1, nTransitions + 1) for kk in range(1, kmax[tt] + 1)])
+
+    def alloc(name, shape_tail, init_first, init_inserted, dtype):
+        a = np.empty((nRows, nOrientations) + shape_tail, dtype=dtype)
+        a[first] = init_first
+        a[~first] = init_inserted
+        return a
+
+    out = {'idxTr': idxTr}
+    specs = [('Pdat', np.nan, np.nan), ('Idat', np.nan, np.nan), ('Wdat', np.nan, np.nan), ('Gdat', 0.0, np.nan)]
+    col0 = 0
+    cols = []
+    for c in chunks:
+        cols.append(slice(col0, col0 + c['ncols']))
+        col0 += c['ncols']
+    for name, f1, f2 in specs:
+        if chunks[0][name] is None:
+            out[name] = None
+            continue
+        dtype = complex if any(np.iscomplexobj(c[name]) for c in chunks) else float
+        a = alloc(name, (), f1, f2, dtype)
+        for c, (t, k), cs in zip(chunks, keys_c, cols):
+            rows = [row_of[(tt, kk)] for tt, kk in zip(t, k)]
+            a[rows, cs] = c[name]
+        out[name] = a
+    for name in ('pPdatN', 'pIdatN'):
+        lists = [c[name] for c in chunks]
+        if not lists[0]:
+            out[name] = []
+            continue
+        merged = []
+        for i in range(len(lists[0])):
+            tail = lists[0][i].shape[2:]
+            a = alloc(name, tail, 0.0, 0.0, float)
+            for c, (t, k), cs in zip(chunks, keys_c, cols):
+                rows = [row_of[(tt, kk)] for tt, kk in zip(t, k)]
+                a[rows, cs] = c[name][i]
+            merged.append(a)
+        out[name] = merged
+    for name in ('nDiagonalizations', 'nRediags', 'nMaxSegmentsReached'):
+        out[name] = sum(c[name] for c in chunks)
+    return out
 
 
 @nout(5)
@@ -465,31 +538,15 @@ def resfields(Sys=None, Exp=None, Opt=None, nargout=4):
 
     # ---------------------------------------------------------------- resonance data
     msg = 'positions'
-    Pdat = np.full((nTransitions, nOrientations), np.nan)
-    pPdatN, pIdatN = [], []
-    if nPerturbNuclei > 0:
-        pPdatN = [np.zeros((nTransitions, nOrientations, nPerturbTransitions[i])) for i in range(nPerturbNuclei)]
     if computeIntensities:
-        Idat = np.full((nTransitions, nOrientations), np.nan)
-        if nPerturbNuclei > 0:
-            pIdatN = [np.zeros((nTransitions, nOrientations, nPerturbTransitions[i])) for i in range(nPerturbNuclei)]
         if computeBoltzmannPopulations:
             BoltzmannPreFactor = 1e6 * _num(F.planck()) / _num(F.boltzm()) / _num(Exp.Temperature)
         msg += ', intensities'
-    else:
-        Idat = np.zeros((0, 0))
     if computeStrains:
         msg += ', strain widths'
-        Wdat = np.full((nTransitions, nOrientations), np.nan)
-    else:
-        Wdat = np.zeros((0, 0))
     if computeGradient:
         msg += ', gradients'
-        Gdat = np.zeros((nTransitions, nOrientations))
-    else:
-        Gdat = np.zeros((0, 0))
     F.logmsg(1, '- Resonance data: computing %s', msg)
-    idxTr = list(range(1, nTransitions + 1)) + [np.inf]
     levelAccuracy = mwFreq * _num(Opt.ModellingAccuracy)
     if higherOrder:
         maxSlope = 0.0
@@ -503,7 +560,6 @@ def resfields(Sys=None, Exp=None, Opt=None, nargout=4):
             maxSlope = abs(max(e[np.argmax(np.abs(e))] for e in eigs_))
         else:
             maxSlope = max(float(np.max(e)) for e in eigs_)
-    nDiagonalizations = nRediags = nMaxSegmentsReached = 0
     minStateStability = 2
     F.logmsg(2, '  ## modelling accuracy %0.3f MHz, max slope %g MHz/mT', levelAccuracy, maxSlope)
     maxSegments = _num(Opt.maxSegments)
@@ -512,255 +568,288 @@ def resfields(Sys=None, Exp=None, Opt=None, nargout=4):
     Ivals_all = vec(np.asarray(Sys.get('I', np.zeros(0)), dtype=float))
     nucPolDiv = float(np.prod(2 * Ivals_all + 1))
 
-    for iOri in range(nOrientations):
-        xLab_M, yLab_M, zLab_M = (vec(x) for x in F.erot(angles_M2L[iOri, :], 'rows', nargout=3))
-        if not higherOrder:
-            kmuzL = zLab_M[0] * kmuxM + zLab_M[1] * kmuyM + zLab_M[2] * kmuzM
-            kmuxL = xLab_M[0] * kmuxM + xLab_M[1] * kmuyM + xLab_M[2] * kmuzM
-            kmuyL = yLab_M[0] * kmuxM + yLab_M[1] * kmuyM + yLab_M[2] * kmuzM
-            if usegStrain and not simplegStrain:
-                kSzL = {e: zLab_M[0] * kSxM[e] + zLab_M[1] * kSyM[e] + zLab_M[2] * kSzM[e] for e in range(nEl)}
+    def _orientations(oris):
+        """The orientation loop for the orientations oris (one column each). Run on all of them,
+        or on chunks in parallel and merged by _merge_orientation_chunks."""
+        nC = len(oris)
+        Pdat = np.full((nTransitions, nC), np.nan)
+        pPdatN, pIdatN = [], []
+        if nPerturbNuclei > 0:
+            pPdatN = [np.zeros((nTransitions, nC, nPerturbTransitions[i])) for i in range(nPerturbNuclei)]
+        Idat = Wdat = Gdat = None
+        if computeIntensities:
+            Idat = np.full((nTransitions, nC), np.nan)
+            if nPerturbNuclei > 0:
+                pIdatN = [np.zeros((nTransitions, nC, nPerturbTransitions[i])) for i in range(nPerturbNuclei)]
         if computeStrains:
-            LineWidthSquared = float(HStrain2 @ zLab_M ** 2)
-        if usePhotoSelection:
-            k_, alpha_ = Exp.lightBeam[0], Exp.lightBeam[1]
-            ori = angles_M2L[iOri, 0:2] if averageOverChi else angles_M2L[iOri, 0:3]
-            photoWeight = _num(F.photoselect(Sys.tdm, ori, k_, alpha_))
-            photoWeight = (1 - _num(Exp.lightScatter)) * photoWeight + _num(Exp.lightScatter)
-        else:
-            photoWeight = 1.0
-
-        # adaptive segmentation of the field range
-        nSegments = 1
-        Bknots = [Range[0], Range[1]]       # linspace(Range(1), Range(2), 2)
-        vectors, E, dEdB, deltaE = [], [], [], []
-        for s in range(nSegments + 1):
-            if higherOrder:
-                d_ = F.gethamdata_hO(Bknots[s], zLab_M, CoreSys, float(Sparse), Trans, float(nLevels), nargout=4)
+            Wdat = np.full((nTransitions, nC), np.nan)
+        if computeGradient:
+            Gdat = np.zeros((nTransitions, nC))
+        idxTr = list(range(1, nTransitions + 1)) + [np.inf]
+        nDiagonalizations = nRediags = nMaxSegmentsReached = 0
+        for col, iOri in enumerate(oris):
+            xLab_M, yLab_M, zLab_M = (vec(x) for x in F.erot(angles_M2L[iOri, :], 'rows', nargout=3))
+            if not higherOrder:
+                kmuzL = zLab_M[0] * kmuxM + zLab_M[1] * kmuyM + zLab_M[2] * kmuzM
+                kmuxL = xLab_M[0] * kmuxM + xLab_M[1] * kmuyM + xLab_M[2] * kmuzM
+                kmuyL = yLab_M[0] * kmuxM + yLab_M[1] * kmuyM + yLab_M[2] * kmuzM
+                if usegStrain and not simplegStrain:
+                    kSzL = {e: zLab_M[0] * kSxM[e] + zLab_M[1] * kSyM[e] + zLab_M[2] * kSzM[e] for e in range(nEl)}
+            if computeStrains:
+                LineWidthSquared = float(HStrain2 @ zLab_M ** 2)
+            if usePhotoSelection:
+                k_, alpha_ = Exp.lightBeam[0], Exp.lightBeam[1]
+                ori = angles_M2L[iOri, 0:2] if averageOverChi else angles_M2L[iOri, 0:3]
+                photoWeight = _num(F.photoselect(Sys.tdm, ori, k_, alpha_))
+                photoWeight = (1 - _num(Exp.lightScatter)) * photoWeight + _num(Exp.lightScatter)
             else:
-                d_ = F.gethamdata(Bknots[s], kH0, kmuzL, Trans, float(nLevels), nargout=4)
-            vectors.append(_d(d_[0])); E.append(vec(d_[1])); dEdB.append(vec(d_[2])); deltaE.append(vec(d_[3]))
-            nDiagonalizations += 1
-        converged = [False] * nSegments
-        while not all(converged) and nSegments < maxSegments:
-            s = converged.index(False)
-            dB = Bknots[s + 1] - Bknots[s]
-            if E[s + 1][-1] - E[s + 1][0] > mwFreq:
-                if LoopFields:
-                    tp = np.abs((deltaE[s] + deltaE[s + 1]) / 2 - mwFreq) <= maxSlope * dB
+                photoWeight = 1.0
+
+            # adaptive segmentation of the field range
+            nSegments = 1
+            Bknots = [Range[0], Range[1]]       # linspace(Range(1), Range(2), 2)
+            vectors, E, dEdB, deltaE = [], [], [], []
+            for s in range(nSegments + 1):
+                if higherOrder:
+                    d_ = F.gethamdata_hO(Bknots[s], zLab_M, CoreSys, float(Sparse), Trans, float(nLevels), nargout=4)
                 else:
-                    tp = (deltaE[s] - mwFreq) * (deltaE[s + 1] - mwFreq) <= 0
-            else:
-                tp = np.zeros(nTransitions, dtype=bool)
-            if not np.any(tp):
-                converged[s] = True
-                continue
-            newB = (Bknots[s] + Bknots[s + 1]) / 2
-            if higherOrder:
-                d_ = F.gethamdata_hO(newB, zLab_M, CoreSys, float(Sparse), Trans, float(nLevels), nargout=4)
-            else:
-                d_ = F.gethamdata(newB, kH0, kmuzL, Trans, float(nLevels), nargout=4)
-            Ve, En, dEdBn, dEn = _d(d_[0]), vec(d_[1]), vec(d_[2]), vec(d_[3])
-            nDiagonalizations += 1
-            include = np.zeros(nCore, dtype=bool)
-            include[u[tp] - 1] = True
-            include[v[tp] - 1] = True
-            deviation = 2 * ((E[s] + E[s + 1]) / 2 + dB / 8 * (dEdB[s] - dEdB[s + 1]) - En)
-            converged_ = bool(np.max(np.abs(deviation[include])) <= levelAccuracy)
-            Bknots.insert(s + 1, newB)
-            E.insert(s + 1, En)
-            vectors.insert(s + 1, Ve)
-            dEdB.insert(s + 1, dEdBn)
-            deltaE.insert(s + 1, dEn)
-            nSegments += 1
-            converged = converged[:s] + [converged_, converged_] + converged[s + 1:]
-        if nSegments >= maxSegments:
-            nMaxSegmentsReached += 1
-            F.logmsg(2, '   segmentation terminated, %d segments, max number of segment reached', nSegments)
-        else:
-            F.logmsg(2, '   segmentation converged, %d segments', nSegments)
-        StateStability = np.column_stack([np.abs(np.sum(np.conj(vectors[s + 1]) * vectors[s], axis=0))
-                                          for s in range(nSegments)])
-        dBs = np.diff(Bknots)
-        SplineModelCoeffs = [_M @ np.vstack([E[s], E[s + 1], dBs[s] * dEdB[s], dBs[s] * dEdB[s + 1]])
-                             for s in range(nSegments)]
-
-        # resonances of each transition
-        ii = 0
-        for iTrans in range(1, nTransitions + 1):
-            while idxTr[ii] < iTrans:
-                ii += 1
-            for s in range(nSegments):
-                coeffs = SplineModelCoeffs[s]
-                dEpoly = coeffs[:, v[iTrans - 1] - 1] - coeffs[:, u[iTrans - 1] - 1]
-                dEpoly[3] -= mwFreq
-                cubicZeros = vec(F.cubicsolve(dEpoly, float(LoopFields))[0])
-                if cubicZeros.size == 0:
+                    d_ = F.gethamdata(Bknots[s], kH0, kmuzL, Trans, float(nLevels), nargout=4)
+                vectors.append(_d(d_[0])); E.append(vec(d_[1])); dEdB.append(vec(d_[2])); deltaE.append(vec(d_[3]))
+                nDiagonalizations += 1
+            converged = [False] * nSegments
+            while not all(converged) and nSegments < maxSegments:
+                s = converged.index(False)
+                dB = Bknots[s + 1] - Bknots[s]
+                if E[s + 1][-1] - E[s + 1][0] > mwFreq:
+                    if LoopFields:
+                        tp = np.abs((deltaE[s] + deltaE[s + 1]) / 2 - mwFreq) <= maxSlope * dB
+                    else:
+                        tp = (deltaE[s] - mwFreq) * (deltaE[s + 1] - mwFreq) <= 0
+                else:
+                    tp = np.zeros(nTransitions, dtype=bool)
+                if not np.any(tp):
+                    converged[s] = True
                     continue
-                ResonanceFields = Bknots[s] + dBs[s] * cubicZeros
-                for iReson in range(ResonanceFields.size):
-                    RF = ResonanceFields[iReson]
-                    if idxTr[ii] > iTrans:
-                        Pdat = np.insert(Pdat, ii, np.nan, axis=0)
-                        if computeIntensities:
-                            Idat = np.insert(Idat, ii, np.nan, axis=0)
-                        if computeStrains:
-                            Wdat = np.insert(Wdat, ii, np.nan, axis=0)
-                        if computeGradient:
-                            Gdat = np.insert(Gdat, ii, np.nan, axis=0)
-                        idxTr.insert(ii, iTrans)
-                        if nPerturbNuclei > 0:
-                            for k_ in range(nPerturbNuclei - 1, -1, -1):
-                                pPdatN[k_] = np.insert(pPdatN[k_], ii, 0.0, axis=0)
-                                if pIdatN:
-                                    pIdatN[k_] = np.insert(pIdatN[k_], ii, 0.0, axis=0)
-                    Pdat[ii, iOri] = RF
-                    if computeEigenPairs or nPerturbNuclei > 0:
-                        uv = Transitions[int(idxTr[ii]) - 1, :].astype(int)
-                        if np.any(StateStability[uv - 1, s] < RediagLimit):
-                            nRediags += 1
-                            if higherOrder:
-                                d_ = F.gethamdata_hO(RF, zLab_M, CoreSys, float(Sparse), Trans, float(nLevels), nargout=2)
-                                Vectors_, Energies = _d(d_[0]), np.asarray(d_[1])
-                                if Sparse:
-                                    Energies = np.diag(Energies) if Energies.ndim == 2 else Energies
-                                    o = np.argsort(Energies, kind='stable')
-                                    Energies, Vectors_ = Energies[o], Vectors_[:, o]
-                            else:
-                                Vectors_, Energies = _eigvec(kH0 - RF * kmuzL)
-                            U = Vectors_[:, uv[0] - 1]
-                            V = Vectors_[:, uv[1] - 1]
-                            F.logmsg(3, '   %d-%d: stabilities %f and %f ===> rediagonalization' %
-                                     (uv[0], uv[1], StateStability[uv[0] - 1, s], StateStability[uv[1] - 1, s]))
-                        else:
-                            z = cubicZeros[iReson]
-                            Ua, Ub = vectors[s][:, uv[0] - 1], vectors[s + 1][:, uv[0] - 1]
-                            k_ = int(np.argmax(np.abs(Ua)))
-                            phase = Ua[k_] / Ub[k_]
-                            U = Ua * (1 - z) + z * phase / abs(phase) * Ub
-                            U = U / np.linalg.norm(U)
-                            Va, Vb = vectors[s][:, uv[1] - 1], vectors[s + 1][:, uv[1] - 1]
-                            k_ = int(np.argmax(np.abs(Va)))
-                            phase = Va[k_] / Vb[k_]
-                            V = Va * (1 - z) + z * phase / abs(phase) * Vb
-                            V = V / np.linalg.norm(V)
-                            if computeBoltzmannPopulations:
-                                t = z
-                                Energies = np.array([t ** 3, t ** 2, t, 1.0]) @ SplineModelCoeffs[s]
-                        if higherOrder:
-                            sp = 'sparse' if Sparse else ''
-                            g1 = F.ham_ezho(CoreSys, np.zeros((0, 0)), np.zeros((0, 0)), sp, 1.0)
-                            g0 = list(F.ham_ez(CoreSys, np.zeros((0, 0)), sp, nargout=3))
-                            if nNuc > 0:
-                                mu0n = F.ham_nz(CoreSys, np.zeros((0, 0)), sp, nargout=3)
-                                g0 = [g0[k] - mu0n[k] for k in range(3)]
-                            kmuM = [-_d(g1[0][n_] + g0[n_]) for n_ in range(3)]
-                            kmuzL = zLab_M[0] * kmuM[0] + zLab_M[1] * kmuM[1] + zLab_M[2] * kmuM[2]
-                            kmuxL = xLab_M[0] * kmuM[0] + xLab_M[1] * kmuM[1] + xLab_M[2] * kmuM[2]
-                            kmuyL = yLab_M[0] * kmuM[0] + yLab_M[1] * kmuM[1] + yLab_M[2] * kmuM[2]
-                        if computeFreq2Field:
-                            dBdE = 1 / abs(np.real(np.vdot(V - U, (-kmuzL) @ (V + U))))
-                            if dBdE > 1e5:
-                                raise ValueError('1/g factor diverges because d(Ev-Eu)/dB is almost zero for transition '
-                                                 f'between levels u={uv[0]} and v={uv[1]}.')
-                        else:
-                            dBdE = 1.0
-                    if computeIntensities:
-                        mu_L = np.array([np.vdot(V, kmuxL @ U), np.vdot(V, kmuyL @ U), np.vdot(V, kmuzL @ U)])
-                        nmu2 = float(np.sum(np.abs(mu_L) ** 2))
-                        if averageOverChi:
-                            if _t(mwmode.linearpolarizedMode):
-                                TransitionRate = ((1 - xi1 ** 2) * nmu2 + (3 * xi1 ** 2 - 1) * abs(nB0_L @ mu_L) ** 2) / 2
-                            elif _t(mwmode.unpolarizedMode):
-                                TransitionRate = ((1 + xik ** 2) * nmu2 + (1 - 3 * xik ** 2) * abs(nB0_L @ mu_L) ** 2) / 4
-                            elif _t(mwmode.circpolarizedMode):
-                                TransitionRate = (((1 + xik ** 2) * nmu2 + (1 - 3 * xik ** 2) * abs(nB0_L @ mu_L) ** 2) / 2
-                                                  - _num(mwmode.circSense) * xik * (nB0_L @ np.cross(1j * mu_L, np.conj(mu_L))))
-                        else:
-                            if _t(mwmode.linearpolarizedMode):
-                                TransitionRate = abs(nB1_L @ mu_L) ** 2
-                            elif _t(mwmode.unpolarizedMode):
-                                TransitionRate = (nmu2 - abs(nk_L @ mu_L) ** 2) / 2
-                            elif _t(mwmode.circpolarizedMode):
-                                TransitionRate = ((nmu2 - abs(nk_L @ mu_L) ** 2)
-                                                  - _num(mwmode.circSense) * (nk_L @ np.cross(1j * mu_L, np.conj(mu_L))))
-                        if abs(TransitionRate) < 1e-10:
-                            TransitionRate = 0.0
-                        if computeBoltzmannPopulations:
-                            Energies = vec(np.real(Energies))
-                            Populations = np.exp(-BoltzmannPreFactor * (Energies - Energies[0]))
-                            Populations = Populations / np.sum(Populations)
-                            Polarization = Populations[u[iTrans - 1] - 1] - Populations[v[iTrans - 1] - 1]
-                            if Polarization < 0:
-                                raise ValueError(f'Negative thermal polarization for transition {u[iTrans - 1]}<->'
-                                                 f'{v[iTrans - 1]}: {Polarization:f}')
-                            if nPerturbNuclei > 0:
-                                Polarization = Polarization / nucPolDiv
-                        elif computeNonEquiPops:
-                            if initStateBasis == 'eigen':
-                                PopulationU, PopulationV = initState[uv[0] - 1, uv[0] - 1], initState[uv[1] - 1, uv[1] - 1]
-                            else:
-                                PopulationU, PopulationV = np.vdot(U, initState @ U), np.vdot(V, initState @ V)
-                            Polarization = float(np.real(PopulationU - PopulationV))
-                            if nPerturbNuclei > 0:
-                                Polarization = Polarization / nucPolDiv
-                        else:
-                            Polarization = 1.0 / nucPolDiv
-                        val = dBdE * TransitionRate * Polarization * photoWeight
-                        if np.iscomplexobj(val) and not np.iscomplexobj(Idat):
-                            Idat = Idat.astype(complex)
-                        Idat[ii, iOri] = val
-                    if computeGradient:
-                        Gradient2 = (np.real(np.vdot(V - U, kmuxL @ (V + U))) ** 2
-                                     + np.real(np.vdot(V - U, kmuyL @ (V + U))) ** 2)
-                        Gdat[ii, iOri] = dBdE * RF * np.sqrt(Gradient2)
-                    if computeStrains:
-                        LineWidth2 = LineWidthSquared
-                        if useDStrain:
-                            for iEl in range(int(CoreSys.nElectrons)):
-                                LineWidth2 = LineWidth2 + abs(_m(dHdD[iEl], U, V)) ** 2
-                                LineWidth2 = LineWidth2 + abs(_m(dHdE[iEl], U, V)) ** 2
-                        if usegStrain or useAStrain:
-                            if simplegStrain:
-                                gA2 = gAslw2[0][:, :, iTrans - 1]
-                            else:
-                                gA2 = 0.0
-                                for iEl in range(nEl):
-                                    gA2 = gA2 + abs(_m(kSzL[iEl], U, V)) * gAslw2[iEl][:, :, iTrans - 1]
-                            LineWidth2 = LineWidth2 + float(zLab_M @ gA2 @ zLab_M)
-                        Wdat[ii, iOri] = dBdE * np.sqrt(LineWidth2)
-                    if nPerturbNuclei > 0:
-                        Su = np.array([[np.vdot(U, Sops[e][c] @ U) for e in range(nEl)] for c in 'xyz'])
-                        Sv = np.array([[np.vdot(V, Sops[e][c] @ V) for e in range(nEl)] for c in 'xyz'])
-                        for iiNuc in range(nPerturbNuclei):
-                            Hu = 0.0
-                            Hv = 0.0
-                            for iEl in range(nEl):
-                                h = Hhfi[(iEl, iiNuc)]
-                                Hu = Hu + Su[0, iEl] * h.x + Su[1, iEl] * h.y + Su[2, iEl] * h.z
-                                Hv = Hv + Sv[0, iEl] * h.x + Sv[1, iEl] * h.y + Sv[2, iEl] * h.z
-                            if not HybridOnlyHFI:
-                                hz = Hzeem[iiNuc]
-                                Hc = Hquad[iiNuc] + RF * (zLab_M[0] * hz.x + zLab_M[1] * hz.y + zLab_M[2] * hz.z)
-                                Hu = Hu + Hc
-                                Hv = Hv + Hc
-                            Hu = (Hu + np.conj(Hu).T) / 2
-                            Hv = (Hv + np.conj(Hv).T) / 2
-                            dEu, Vu = np.linalg.eigh(Hu)
-                            dEv, Vv = np.linalg.eigh(Hv)
-                            if EASYSPIN_HYBRID_PAIRING:   # EasySpin: abs(Vu'*Vv).^2, rows are u states
-                                NTR = np.abs(Vu.conj().T @ Vv) ** 2
-                            else:                         # rows v, columns u, as resfreqs_matrix's Vf'*Vi
-                                NTR = np.abs(Vv.conj().T @ Vu) ** 2
-                            nn = NTR.shape[0]
-                            vidx = np.tile(np.arange(nn), NTR.shape[1])     # [vidx,uidx] = find(ones(size(NTR)))
-                            uidx = np.repeat(np.arange(NTR.shape[1]), nn)
-                            pPdatN[iiNuc][ii, iOri, :] = -dBdE * (dEv[vidx] - dEu[uidx])
-                            if pIdatN:
-                                pIdatN[iiNuc][ii, iOri, :] = NTR.ravel(order='F')
+                newB = (Bknots[s] + Bknots[s + 1]) / 2
+                if higherOrder:
+                    d_ = F.gethamdata_hO(newB, zLab_M, CoreSys, float(Sparse), Trans, float(nLevels), nargout=4)
+                else:
+                    d_ = F.gethamdata(newB, kH0, kmuzL, Trans, float(nLevels), nargout=4)
+                Ve, En, dEdBn, dEn = _d(d_[0]), vec(d_[1]), vec(d_[2]), vec(d_[3])
+                nDiagonalizations += 1
+                include = np.zeros(nCore, dtype=bool)
+                include[u[tp] - 1] = True
+                include[v[tp] - 1] = True
+                deviation = 2 * ((E[s] + E[s + 1]) / 2 + dB / 8 * (dEdB[s] - dEdB[s + 1]) - En)
+                converged_ = bool(np.max(np.abs(deviation[include])) <= levelAccuracy)
+                Bknots.insert(s + 1, newB)
+                E.insert(s + 1, En)
+                vectors.insert(s + 1, Ve)
+                dEdB.insert(s + 1, dEdBn)
+                deltaE.insert(s + 1, dEn)
+                nSegments += 1
+                converged = converged[:s] + [converged_, converged_] + converged[s + 1:]
+            if nSegments >= maxSegments:
+                nMaxSegmentsReached += 1
+                F.logmsg(2, '   segmentation terminated, %d segments, max number of segment reached', nSegments)
+            else:
+                F.logmsg(2, '   segmentation converged, %d segments', nSegments)
+            StateStability = np.column_stack([np.abs(np.sum(np.conj(vectors[s + 1]) * vectors[s], axis=0))
+                                              for s in range(nSegments)])
+            dBs = np.diff(Bknots)
+            SplineModelCoeffs = [_M @ np.vstack([E[s], E[s + 1], dBs[s] * dEdB[s], dBs[s] * dEdB[s + 1]])
+                                 for s in range(nSegments)]
+
+            # resonances of each transition
+            ii = 0
+            for iTrans in range(1, nTransitions + 1):
+                while idxTr[ii] < iTrans:
                     ii += 1
-                if not LoopFields:
-                    break
+                for s in range(nSegments):
+                    coeffs = SplineModelCoeffs[s]
+                    dEpoly = coeffs[:, v[iTrans - 1] - 1] - coeffs[:, u[iTrans - 1] - 1]
+                    dEpoly[3] -= mwFreq
+                    cubicZeros = vec(F.cubicsolve(dEpoly, float(LoopFields))[0])
+                    if cubicZeros.size == 0:
+                        continue
+                    ResonanceFields = Bknots[s] + dBs[s] * cubicZeros
+                    for iReson in range(ResonanceFields.size):
+                        RF = ResonanceFields[iReson]
+                        if idxTr[ii] > iTrans:
+                            Pdat = np.insert(Pdat, ii, np.nan, axis=0)
+                            if computeIntensities:
+                                Idat = np.insert(Idat, ii, np.nan, axis=0)
+                            if computeStrains:
+                                Wdat = np.insert(Wdat, ii, np.nan, axis=0)
+                            if computeGradient:
+                                Gdat = np.insert(Gdat, ii, np.nan, axis=0)
+                            idxTr.insert(ii, iTrans)
+                            if nPerturbNuclei > 0:
+                                for k_ in range(nPerturbNuclei - 1, -1, -1):
+                                    pPdatN[k_] = np.insert(pPdatN[k_], ii, 0.0, axis=0)
+                                    if pIdatN:
+                                        pIdatN[k_] = np.insert(pIdatN[k_], ii, 0.0, axis=0)
+                        Pdat[ii, col] = RF
+                        if computeEigenPairs or nPerturbNuclei > 0:
+                            uv = Transitions[int(idxTr[ii]) - 1, :].astype(int)
+                            if np.any(StateStability[uv - 1, s] < RediagLimit):
+                                nRediags += 1
+                                if higherOrder:
+                                    d_ = F.gethamdata_hO(RF, zLab_M, CoreSys, float(Sparse), Trans, float(nLevels), nargout=2)
+                                    Vectors_, Energies = _d(d_[0]), np.asarray(d_[1])
+                                    if Sparse:
+                                        Energies = np.diag(Energies) if Energies.ndim == 2 else Energies
+                                        o = np.argsort(Energies, kind='stable')
+                                        Energies, Vectors_ = Energies[o], Vectors_[:, o]
+                                else:
+                                    Vectors_, Energies = _eigvec(kH0 - RF * kmuzL)
+                                U = Vectors_[:, uv[0] - 1]
+                                V = Vectors_[:, uv[1] - 1]
+                                F.logmsg(3, '   %d-%d: stabilities %f and %f ===> rediagonalization' %
+                                         (uv[0], uv[1], StateStability[uv[0] - 1, s], StateStability[uv[1] - 1, s]))
+                            else:
+                                z = cubicZeros[iReson]
+                                Ua, Ub = vectors[s][:, uv[0] - 1], vectors[s + 1][:, uv[0] - 1]
+                                k_ = int(np.argmax(np.abs(Ua)))
+                                phase = Ua[k_] / Ub[k_]
+                                U = Ua * (1 - z) + z * phase / abs(phase) * Ub
+                                U = U / np.linalg.norm(U)
+                                Va, Vb = vectors[s][:, uv[1] - 1], vectors[s + 1][:, uv[1] - 1]
+                                k_ = int(np.argmax(np.abs(Va)))
+                                phase = Va[k_] / Vb[k_]
+                                V = Va * (1 - z) + z * phase / abs(phase) * Vb
+                                V = V / np.linalg.norm(V)
+                                if computeBoltzmannPopulations:
+                                    t = z
+                                    Energies = np.array([t ** 3, t ** 2, t, 1.0]) @ SplineModelCoeffs[s]
+                            if higherOrder:
+                                sp = 'sparse' if Sparse else ''
+                                g1 = F.ham_ezho(CoreSys, np.zeros((0, 0)), np.zeros((0, 0)), sp, 1.0)
+                                g0 = list(F.ham_ez(CoreSys, np.zeros((0, 0)), sp, nargout=3))
+                                if nNuc > 0:
+                                    mu0n = F.ham_nz(CoreSys, np.zeros((0, 0)), sp, nargout=3)
+                                    g0 = [g0[k] - mu0n[k] for k in range(3)]
+                                kmuM = [-_d(g1[0][n_] + g0[n_]) for n_ in range(3)]
+                                kmuzL = zLab_M[0] * kmuM[0] + zLab_M[1] * kmuM[1] + zLab_M[2] * kmuM[2]
+                                kmuxL = xLab_M[0] * kmuM[0] + xLab_M[1] * kmuM[1] + xLab_M[2] * kmuM[2]
+                                kmuyL = yLab_M[0] * kmuM[0] + yLab_M[1] * kmuM[1] + yLab_M[2] * kmuM[2]
+                            if computeFreq2Field:
+                                dBdE = 1 / abs(np.real(np.vdot(V - U, (-kmuzL) @ (V + U))))
+                                if dBdE > 1e5:
+                                    raise ValueError('1/g factor diverges because d(Ev-Eu)/dB is almost zero for transition '
+                                                     f'between levels u={uv[0]} and v={uv[1]}.')
+                            else:
+                                dBdE = 1.0
+                        if computeIntensities:
+                            mu_L = np.array([np.vdot(V, kmuxL @ U), np.vdot(V, kmuyL @ U), np.vdot(V, kmuzL @ U)])
+                            nmu2 = float(np.sum(np.abs(mu_L) ** 2))
+                            if averageOverChi:
+                                if _t(mwmode.linearpolarizedMode):
+                                    TransitionRate = ((1 - xi1 ** 2) * nmu2 + (3 * xi1 ** 2 - 1) * abs(nB0_L @ mu_L) ** 2) / 2
+                                elif _t(mwmode.unpolarizedMode):
+                                    TransitionRate = ((1 + xik ** 2) * nmu2 + (1 - 3 * xik ** 2) * abs(nB0_L @ mu_L) ** 2) / 4
+                                elif _t(mwmode.circpolarizedMode):
+                                    TransitionRate = (((1 + xik ** 2) * nmu2 + (1 - 3 * xik ** 2) * abs(nB0_L @ mu_L) ** 2) / 2
+                                                      - _num(mwmode.circSense) * xik * (nB0_L @ np.cross(1j * mu_L, np.conj(mu_L))))
+                            else:
+                                if _t(mwmode.linearpolarizedMode):
+                                    TransitionRate = abs(nB1_L @ mu_L) ** 2
+                                elif _t(mwmode.unpolarizedMode):
+                                    TransitionRate = (nmu2 - abs(nk_L @ mu_L) ** 2) / 2
+                                elif _t(mwmode.circpolarizedMode):
+                                    TransitionRate = ((nmu2 - abs(nk_L @ mu_L) ** 2)
+                                                      - _num(mwmode.circSense) * (nk_L @ np.cross(1j * mu_L, np.conj(mu_L))))
+                            if abs(TransitionRate) < 1e-10:
+                                TransitionRate = 0.0
+                            if computeBoltzmannPopulations:
+                                Energies = vec(np.real(Energies))
+                                Populations = np.exp(-BoltzmannPreFactor * (Energies - Energies[0]))
+                                Populations = Populations / np.sum(Populations)
+                                Polarization = Populations[u[iTrans - 1] - 1] - Populations[v[iTrans - 1] - 1]
+                                if Polarization < 0:
+                                    raise ValueError(f'Negative thermal polarization for transition {u[iTrans - 1]}<->'
+                                                     f'{v[iTrans - 1]}: {Polarization:f}')
+                                if nPerturbNuclei > 0:
+                                    Polarization = Polarization / nucPolDiv
+                            elif computeNonEquiPops:
+                                if initStateBasis == 'eigen':
+                                    PopulationU, PopulationV = initState[uv[0] - 1, uv[0] - 1], initState[uv[1] - 1, uv[1] - 1]
+                                else:
+                                    PopulationU, PopulationV = np.vdot(U, initState @ U), np.vdot(V, initState @ V)
+                                Polarization = float(np.real(PopulationU - PopulationV))
+                                if nPerturbNuclei > 0:
+                                    Polarization = Polarization / nucPolDiv
+                            else:
+                                Polarization = 1.0 / nucPolDiv
+                            val = dBdE * TransitionRate * Polarization * photoWeight
+                            if np.iscomplexobj(val) and not np.iscomplexobj(Idat):
+                                Idat = Idat.astype(complex)
+                            Idat[ii, col] = val
+                        if computeGradient:
+                            Gradient2 = (np.real(np.vdot(V - U, kmuxL @ (V + U))) ** 2
+                                         + np.real(np.vdot(V - U, kmuyL @ (V + U))) ** 2)
+                            Gdat[ii, col] = dBdE * RF * np.sqrt(Gradient2)
+                        if computeStrains:
+                            LineWidth2 = LineWidthSquared
+                            if useDStrain:
+                                for iEl in range(int(CoreSys.nElectrons)):
+                                    LineWidth2 = LineWidth2 + abs(_m(dHdD[iEl], U, V)) ** 2
+                                    LineWidth2 = LineWidth2 + abs(_m(dHdE[iEl], U, V)) ** 2
+                            if usegStrain or useAStrain:
+                                if simplegStrain:
+                                    gA2 = gAslw2[0][:, :, iTrans - 1]
+                                else:
+                                    gA2 = 0.0
+                                    for iEl in range(nEl):
+                                        gA2 = gA2 + abs(_m(kSzL[iEl], U, V)) * gAslw2[iEl][:, :, iTrans - 1]
+                                LineWidth2 = LineWidth2 + float(zLab_M @ gA2 @ zLab_M)
+                            Wdat[ii, col] = dBdE * np.sqrt(LineWidth2)
+                        if nPerturbNuclei > 0:
+                            Su = np.array([[np.vdot(U, Sops[e][c] @ U) for e in range(nEl)] for c in 'xyz'])
+                            Sv = np.array([[np.vdot(V, Sops[e][c] @ V) for e in range(nEl)] for c in 'xyz'])
+                            for iiNuc in range(nPerturbNuclei):
+                                Hu = 0.0
+                                Hv = 0.0
+                                for iEl in range(nEl):
+                                    h = Hhfi[(iEl, iiNuc)]
+                                    Hu = Hu + Su[0, iEl] * h.x + Su[1, iEl] * h.y + Su[2, iEl] * h.z
+                                    Hv = Hv + Sv[0, iEl] * h.x + Sv[1, iEl] * h.y + Sv[2, iEl] * h.z
+                                if not HybridOnlyHFI:
+                                    hz = Hzeem[iiNuc]
+                                    Hc = Hquad[iiNuc] + RF * (zLab_M[0] * hz.x + zLab_M[1] * hz.y + zLab_M[2] * hz.z)
+                                    Hu = Hu + Hc
+                                    Hv = Hv + Hc
+                                Hu = (Hu + np.conj(Hu).T) / 2
+                                Hv = (Hv + np.conj(Hv).T) / 2
+                                dEu, Vu = np.linalg.eigh(Hu)
+                                dEv, Vv = np.linalg.eigh(Hv)
+                                if EASYSPIN_HYBRID_PAIRING:   # EasySpin: abs(Vu'*Vv).^2, rows are u states
+                                    NTR = np.abs(Vu.conj().T @ Vv) ** 2
+                                else:                         # rows v, columns u, as resfreqs_matrix's Vf'*Vi
+                                    NTR = np.abs(Vv.conj().T @ Vu) ** 2
+                                nn = NTR.shape[0]
+                                vidx = np.tile(np.arange(nn), NTR.shape[1])     # [vidx,uidx] = find(ones(size(NTR)))
+                                uidx = np.repeat(np.arange(NTR.shape[1]), nn)
+                                pPdatN[iiNuc][ii, col, :] = -dBdE * (dEv[vidx] - dEu[uidx])
+                                if pIdatN:
+                                    pIdatN[iiNuc][ii, col, :] = NTR.ravel(order='F')
+                        ii += 1
+                    if not LoopFields:
+                        break
+        return dict(idxTr=idxTr[:-1], ncols=nC, Pdat=Pdat, Idat=Idat, Wdat=Wdat, Gdat=Gdat, pPdatN=pPdatN,
+                    pIdatN=pIdatN, nDiagonalizations=nDiagonalizations, nRediags=nRediags,
+                    nMaxSegmentsReached=nMaxSegmentsReached)
+
+    # Orientations are independent: large problems run in chunks on the worker pool
+    # (pyeasyspin/_parallel.py); the merged result equals the serial loop's.
+    R = _merge_orientation_chunks(chunked(_orientations, nOrientations), nTransitions, nOrientations)
+    idxTr = R['idxTr'] + [np.inf]
+    Pdat, pPdatN, pIdatN = R['Pdat'], R['pPdatN'], R['pIdatN']
+    Idat = R['Idat'] if computeIntensities else np.zeros((0, 0))
+    Wdat = R['Wdat'] if computeStrains else np.zeros((0, 0))
+    Gdat = R['Gdat'] if computeGradient else np.zeros((0, 0))
+    nDiagonalizations, nRediags, nMaxSegmentsReached = (R['nDiagonalizations'], R['nRediags'],
+                                                        R['nMaxSegmentsReached'])
 
     # ---------------------------------------------------------------- post-selection
     idxTr = idxTr[:-1]

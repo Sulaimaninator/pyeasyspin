@@ -20,6 +20,10 @@ explained in [DEVIATIONS.md](DEVIATIONS.md).
 - Errors raise `ValueError` or `TypeError` with EasySpin's message text. The log level is
   `pyeasyspin.config.LogLevel`.
 - Internal functions (second list) are reachable as `pyeasyspin._registry.F.<name>`.
+- Multicore (a pyeasyspin addition): `esfit` and large `pepper` simulations use all CPU cores, and
+  `pyeasyspin.parallel_map(fcn, inputs)` runs independent simulations in parallel. Results are the
+  same as serial ones. Settings: `pyeasyspin.config.Workers` (`'auto'` = all cores, `1` = serial),
+  `config.BLASThreads` (BLAS threads inside a call, default 1), `config.ParallelMinTime` (s).
 
 ## Public functions (176)
 

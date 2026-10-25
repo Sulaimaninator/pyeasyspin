@@ -1,6 +1,7 @@
 """Least-squares fitting for EPR and other data (headless: the esfit GUI is not ported)."""
 import inspect
 import numbers
+import time
 
 import numpy as np
 from scipy.special import erfcinv
@@ -8,6 +9,7 @@ from scipy.special import erfcinv
 from .._registry import F, nout
 from .._struct import Struct
 from .._mat import isempty, vec
+from .._parallel import ModelCache
 
 _ALGNAMES = ['Nelder-Mead simplex', 'Levenberg-Marquardt', 'Monte Carlo', 'genetic algorithm',
              'grid search', 'particle swarm', 'lsqnonlin']
@@ -369,6 +371,9 @@ def _runFitting(S, rng):
     lb = S.pvec_lb
     ub = S.pvec_ub
     S.best = Struct(rmsd=np.inf, rmsdtarget=np.inf)
+    # Model outputs that the algorithms ask for ahead of use are computed in parallel
+    # (pyeasyspin/_parallel.py); the fit itself consumes them in its own order.
+    S.modelcache = ModelCache(S.fcn, _model_kw(S))
     fitOpt = Struct(S.Opts)
     nActiveParams = int(np.sum(activeParams))
     if nActiveParams > 0:
@@ -378,6 +383,7 @@ def _runFitting(S, rng):
         iterupdate = False
         residualfun = lambda x: _residuals(S, x, fitOpt, iterupdate)
         rmsdfun = lambda x: _rmsd(S, x, fitOpt, iterupdate)
+        residualfun.prefetch = rmsdfun.prefetch = lambda X: _prefetch(S, X)
         p0_active = p_start[activeParams]
         lb_active = lb[activeParams]
         ub_active = ub[activeParams]
@@ -443,6 +449,7 @@ def _runFitting(S, rng):
         fitOpt2 = Struct(fitOpt)
         fitOpt2.track = False
         residualfun = lambda x: _residuals(S, x, fitOpt2, False)
+        residualfun.prefetch = lambda X: _prefetch(S, X)
         # lb/ub keep the finite-difference stencil inside the bounds (DEVIATIONS.md)
         if BOUNDED_FD:
             J = F.jacobianest(residualfun, pfit_active, lb=lb[activeParams], ub=ub[activeParams])
@@ -451,6 +458,7 @@ def _runFitting(S, rng):
         if isinstance(J, tuple):
             J = J[0]
         J = np.asarray(J)
+        S.modelcache = None
         if J.size > 0 and not np.any(np.isnan(J)):
             if Verbosity >= 1:
                 print('  Calculating parameter covariance matrix...')
@@ -562,12 +570,34 @@ def _rmsd(S, x, Opt, iterupdate):
     return rmsd, userstop
 
 
+def _model_kw(S):
+    return {} if S.nargout_kw is None else {'nargout': S.nargout_kw}
+
+
+def _model_args(S, par):
+    return tuple(S.p2args(par)) if S.cellInputs else (par,)
+
+
+def _par(S, x):
+    par = S.p_start.copy()
+    par[~S.fixedParams] = vec(np.asarray(x, dtype=float))
+    return par
+
+
+def _prefetch(S, X):
+    """Compute the model for the parameter points X (active parameters) ahead of use."""
+    pars = [_par(S, x) for x in X]
+    S.modelcache.compute([p.tobytes() for p in pars], [_model_args(S, p) for p in pars])
+
+
 def _model_output(S, par):
-    kw = {} if S.nargout_kw is None else {'nargout': S.nargout_kw}
-    if S.cellInputs:
-        out = S.fcn(*S.p2args(par), **kw)
-    else:
-        out = S.fcn(par, **kw)
+    cache = S.get('modelcache')
+    out = cache.take(par.tobytes()) if cache is not None else None
+    if out is None:
+        t = time.perf_counter()
+        out = S.fcn(*_model_args(S, par), **_model_kw(S))
+        if cache is not None:
+            cache.timing(time.perf_counter() - t)
     outs = out if isinstance(out, tuple) else (out,)
     if S.OutArgument is not None:
         return outs[S.OutArgument - 1]
@@ -580,9 +610,7 @@ def _residuals(S, x, Opt, iterupdate):
     userstop = S.UserCommand != 0
     expdata = S.data
     mask = Opt.Mask if S.Opts.useMask else np.ones(Opt.Mask.shape, dtype=bool)
-    par = S.p_start.copy()
-    active = ~S.fixedParams
-    par[active] = vec(np.asarray(x, dtype=float))
+    par = _par(S, x)
     try:
         simdata = _model_output(S, par)
         S.modelEvalError = False

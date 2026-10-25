@@ -1,11 +1,11 @@
 """Nelder/Mead simplex minimization algorithm"""
-import time
 
 import numpy as np
 
 from .._registry import F, nout
 from .._struct import Struct
 from .._mat import isempty
+from .._parallel import prefetch, batch_size, cpu_time
 
 
 def _call(fcn, x):
@@ -72,7 +72,7 @@ def esfit_simplex(fcn=None, x0=None, lb=None, ub=None, FitOpt=None, rng=None):
     iIteration = 0
     nEvals = 0
     stopCode = 0
-    startTime = time.process_time()
+    startTime = cpu_time()
     elapsedTime = 0.0
     nVertices = nParams + 1
     v = np.repeat(x0[:, None], nVertices, axis=1)
@@ -81,6 +81,7 @@ def esfit_simplex(fcn=None, x0=None, lb=None, ub=None, FitOpt=None, rng=None):
     info = Struct()
     info.simplex_initial = v.copy()
     fv = np.zeros(nVertices)
+    prefetch(fcn, [constrain(v[:, iVertex]) for iVertex in range(nVertices - 1, -1, -1)])
     for iVertex in range(nVertices - 1, -1, -1):
         x = constrain(v[:, iVertex])
         fv[iVertex], UserStop = _call(fcn, x)
@@ -99,7 +100,7 @@ def esfit_simplex(fcn=None, x0=None, lb=None, ub=None, FitOpt=None, rng=None):
 
     while True:
         fv_old = fv.copy()
-        elapsedTime = (time.process_time() - startTime) / 60
+        elapsedTime = (cpu_time() - startTime) / 60
         if elapsedTime > FitOpt.maxTime:
             stopCode = 1
             break
@@ -111,6 +112,12 @@ def esfit_simplex(fcn=None, x0=None, lb=None, ub=None, FitOpt=None, rng=None):
         xbar = np.mean(v[:, :-1], axis=1)
         xr = xbar + rho * (xbar - v[:, -1])
         xr = constrain(xr)
+        if batch_size(fcn) > 1:
+            # Reflection, expansion and both contractions evaluated together; the step below uses
+            # the one(s) it needs, so the result is the same as evaluating them one by one.
+            prefetch(fcn, [xr, constrain(xbar + rho * chi * (xbar - v[:, -1])),
+                           constrain(xbar + psi * rho * (xbar - v[:, -1])),
+                           constrain(xbar - psi * (xbar - v[:, -1]))])
         fr, _ = _call(fcn, xr)
         nEvals += 1
         doReduction = False
@@ -155,6 +162,7 @@ def esfit_simplex(fcn=None, x0=None, lb=None, ub=None, FitOpt=None, rng=None):
                 doReduction = True
         if doReduction:
             Procedure = 'reduction'
+            prefetch(fcn, [constrain(v[:, 0] + sigma * (v[:, i] - v[:, 0])) for i in range(1, nVertices)])
             for iVertex in range(1, nVertices):
                 xshr = v[:, 0] + sigma * (v[:, iVertex] - v[:, 0])
                 xshr = constrain(xshr)

@@ -1,5 +1,4 @@
 """Levenberg-Marquardt nonlinear least squares fitting"""
-import time
 
 import numpy as np
 from scipy.linalg import solve_triangular
@@ -7,6 +6,7 @@ from scipy.linalg import solve_triangular
 from .._registry import F, nout
 from .._struct import Struct
 from .._mat import isempty
+from .._parallel import prefetch, cpu_time
 
 
 def _call(fcn, x):
@@ -48,7 +48,7 @@ def esfit_levmar(fcn=None, x0=None, lb=None, ub=None, FitOpt=None, rng=None):
     DefOpt, _ = F.esfit_algdefaults('Levenberg-Marquardt')
     FitOpt = F.adddefaults(FitOpt, DefOpt)
     delta = FitOpt.delta
-    startTime = time.process_time()
+    startTime = cpu_time()
     Fval = np.nan
     norm_g = np.nan
     nEvals = 0
@@ -77,6 +77,7 @@ def esfit_levmar(fcn=None, x0=None, lb=None, ub=None, FitOpt=None, rng=None):
         lb = transform(lb0)
         fcn0 = fcn
         fcn = lambda x: fcn0(untransform(x))
+        fcn.prefetch = lambda X: prefetch(fcn0, [untransform(x) for x in X])
     x = x0.copy()
     stopCode = 0
     Je = None
@@ -121,6 +122,13 @@ def esfit_levmar(fcn=None, x0=None, lb=None, ub=None, FitOpt=None, rng=None):
             break
         xnew = x + h
         xnew = np.minimum(np.maximum(xnew, lb), ub)
+        # The trial point and, when this iteration will need it, the Jacobian-update point below
+        # are independent: evaluate them together.
+        jn = j % n + 1
+        if abs(h[jn - 1]) < 0.8 * norm_h:
+            xu = x.copy()
+            xu[jn - 1] = x[jn - 1] + _fdstep(x, jn - 1, delta, lb, ub)
+            prefetch(fcn, [xnew, xu])
         stopCode, Fnew, fnew = _funeval(fcn, xnew)
         nEvals += 1
         if stopCode:
@@ -162,7 +170,7 @@ def esfit_levmar(fcn=None, x0=None, lb=None, ub=None, FitOpt=None, rng=None):
         if np.isinf(norm_g) or np.isinf(np.max(np.abs(A))):
             stopCode = -5
             break
-        elapsedTime = (time.process_time() - startTime) / 60
+        elapsedTime = (cpu_time() - startTime) / 60
         if elapsedTime > FitOpt.maxTime:
             stopCode = 3
             break
@@ -200,6 +208,12 @@ def esfit_levmar(fcn=None, x0=None, lb=None, ub=None, FitOpt=None, rng=None):
 def _JacobianEstimate(funfcn, x0, f0, delta, lb, ub):
     nVariables = x0.size
     J = np.zeros((f0.size, nVariables), dtype=f0.dtype if np.iscomplexobj(f0) else float)
+    pts = []
+    for ix in range(nVariables):
+        x1 = x0.copy()
+        x1[ix] = x0[ix] + _fdstep(x0, ix, delta, lb, ub)
+        pts.append(x1)
+    prefetch(funfcn, pts)                            # all columns at once
     for ix in range(nVariables):
         x1 = x0.copy()
         d = _fdstep(x0, ix, delta, lb, ub)

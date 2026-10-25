@@ -1,12 +1,12 @@
 """Genetic algorithm for least-squares fitting"""
 import math
-import time
 
 import numpy as np
 
 from .._registry import F, nout
 from .._struct import Struct
 from .._mat import isempty
+from .._parallel import prefetch, cpu_time
 
 
 def _call(fcn, x):
@@ -55,7 +55,7 @@ def esfit_genetic(fcn=None, lb=None, ub=None, FitOpt=None, rng=None):
                                   '  population %d, elite %d' % (P, Elite),
                                   '  %d generations' % FitOpt.maxGenerations])
     nEvals = 0
-    startTime = time.process_time()
+    startTime = cpu_time()
     Population = lb + (ub - lb) * _rand(src, P, nParams)
     bestScore = np.inf
     bestx = np.zeros(nParams)
@@ -63,6 +63,7 @@ def esfit_genetic(fcn=None, lb=None, ub=None, FitOpt=None, rng=None):
         FitOpt.IterationPrintFunction('initial population')
     info = Struct()
     Scores = np.full(P, np.inf)
+    prefetch(fcn, [Population[k, :].copy() for k in range(P)])
     for k in range(P):
         Scores[k] = _call(fcn, Population[k, :].copy())
         nEvals += 1
@@ -95,7 +96,7 @@ def esfit_genetic(fcn=None, lb=None, ub=None, FitOpt=None, rng=None):
         if gen >= FitOpt.maxGenerations:
             stopCode = 0
             break
-        elapsedTime = (time.process_time() - startTime) / 60
+        elapsedTime = (cpu_time() - startTime) / 60
         if elapsedTime > FitOpt.maxTime:
             stopCode = 1
             break
@@ -122,6 +123,7 @@ def esfit_genetic(fcn=None, lb=None, ub=None, FitOpt=None, rng=None):
         for p in range(nParams):
             Offspring[Offspring[:, p] < lb[p], p] = lb[p]
             Offspring[Offspring[:, p] > ub[p], p] = ub[p]
+        prefetch(fcn, [Offspring[k, :].copy() for k in range(P)])
         for k in range(P):
             offScores[k] = _call(fcn, Offspring[k, :].copy())
             nEvals += 1

@@ -15,6 +15,8 @@ dependencies = [
     "numpy>=2.0",
     "scipy>=1.13",
     "numba>=0.60",
+    "loky>=3.4",
+    "threadpoolctl>=3.1",
 ]
 keywords = ["EPR", "ESR", "ENDOR", "ESEEM", "spectroscopy", "simulation", "EasySpin", "spin Hamiltonian"]
 classifiers = [
