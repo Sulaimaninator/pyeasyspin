@@ -1,0 +1,41 @@
+[build-system]
+requires = ["hatchling>=1.26"]
+build-backend = "hatchling.build"
+
+[project]
+name = "pyeasyspin"
+version = "0.1.0"
+description = "Unofficial Python port of the EasySpin EPR simulation and analysis toolbox (EasySpin 6.0.12)"
+readme = "README.md"
+license = "MIT"
+license-files = ["LICENSE"]
+requires-python = ">=3.11"
+authors = [{ name = "Sulaiman" }]
+dependencies = [
+    "numpy>=2.0",
+    "scipy>=1.13",
+    "numba>=0.60",
+]
+keywords = ["EPR", "ESR", "ENDOR", "ESEEM", "spectroscopy", "simulation", "EasySpin", "spin Hamiltonian"]
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Intended Audience :: Science/Research",
+    "Programming Language :: Python :: 3",
+    "Topic :: Scientific/Engineering :: Chemistry",
+    "Topic :: Scientific/Engineering :: Physics",
+]
+
+[project.urls]
+Homepage = "https://github.com/Sulaimaninator/pyeasyspin"
+Issues = "https://github.com/Sulaimaninator/pyeasyspin/issues"
+EasySpin = "https://easyspin.org"
+
+[project.optional-dependencies]
+plot = ["matplotlib>=3.9"]
+test = ["pytest>=7", "matplotlib>=3.9"]
+
+[tool.hatch.build.targets.sdist]
+include = ["pyeasyspin", "tests", "docs", "README.md", "LICENSE"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]

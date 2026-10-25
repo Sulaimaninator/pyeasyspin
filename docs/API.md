@@ -1,0 +1,328 @@
+# Function reference
+
+Every ported EasySpin function with its Python signature, its outputs in MATLAB's order, and what it
+does. Notes in parentheses describe Python-specific behaviour; corrections of EasySpin errors are
+explained in [DEVIATIONS.md](DEVIATIONS.md).
+
+## Conventions
+
+- Same names, fields and units as EasySpin. `Sys`, `Exp` and `Opt` are `pyeasyspin.Struct`, a `dict`
+  with attribute access (`Sys.g` and `Sys['g']` are the same).
+- Several outputs are returned as a tuple in MATLAB's order; a single output is a plain value. Where
+  EasySpin's behaviour depends on the number of requested outputs, the function takes `nargout=`.
+- Arguments that are not given are `None`, as with MATLAB's nargin. Numeric inputs may be Python
+  lists or NumPy arrays.
+- Outputs keep MATLAB's shapes: a row vector is a 1 x N array, a matrix keeps MATLAB's layout. Cell
+  arrays are `pyeasyspin._matlab.Cell` (a list in column-major order, with the MATLAB shape in
+  `.mshape`); struct arrays are lists of `Struct`.
+- Nothing is plotted unless `plot=True` is passed (EasySpin plots when called without outputs).
+- Indices that users see (transitions, sites, orientations) are 1-based, as in EasySpin.
+- Errors raise `ValueError` or `TypeError` with EasySpin's message text. The log level is
+  `pyeasyspin.config.LogLevel`.
+- Internal functions (second list) are reachable as `pyeasyspin._registry.F.<name>`.
+
+## Public functions (176)
+
+- `addnoise(y, SNR, noisemodel)` -> yn: Add noise to a signal (numpy RNG (keyword rng))
+- `amu()` -> u, sigma: Atomic mass unit
+- `ang2vec(phi, theta)` -> varargout: Polar angles to cartesian coordinates (nargout=3 -> (x, y, z) 1xN rows)
+- `angstrom()` -> A: Angstrom, molecular-scale length unit
+- `apowin(Type, n, alpha)` -> varargout: Apodization windows (returns the n x 1 window (no plot))
+- `avogadro()` -> NA: Avogadro number
+- `barn()` -> b: barn, unit of nuclear quadrupole constants
+- `basecorr(data, dim, n, region)` -> varargout: Baseline correction (returns (datacorr, baseline); lstsq instead of mldivide)
+- `blochsteady(g, T1, T2, DeltaB0, B1, modAmp, modFreq, Options=None, nargout=None, plot=False)` -> (t, My) | (t, Mx, My, Mz) | (t, Mx, My, Mz, Xk, Yk, Zk): Steady-state solutions of Bloch equations (default nargout 4; plot=True = MATLAB nargout 0: adds the period's last point and draws; 'td' does not print the imag/real check)
+- `bmagn()` -> mu, sigma: Bohr magneton
+- `bohrrad()` -> a0, sigma: Bohr radius
+- `boltzm()` -> kB: Boltzmann constant
+- `cardamom(Sys, Exp, Par, Opt=None, MD=None, nargout=2, plot=False, rng=None)` -> spc | (B, spc) | (B, spc, TDSignal) | (B, spc, TDSignal, t): Trajectory-based simulation of CW-EPR spectra (default nargout 2; plot=True replaces MATLAB's nargout=0 plot; random trajectories from rng (numpy Generator/RandomState, default the global stream), so spectra match MATLAB statistically; the diffusion+Sys.Potential qTraj indexing is fixed (DEVIATIONS, flag `cardamom.EASYSPIN_QTRAJ_INDEXING`))
+- `cgmatrix(S1, S2, Stot)` -> U2C, Smtot, m12: Transformation matrix between coupled and uncoupled representations (reproduces MATLAB array growth when one Stot is given)
+- `chili(Sys, Exp, Opt=None, nargout=None, plot=False)` -> (x, spec) | spec | (x, spec, info): Slow-motion cw EPR (SLE; fast S=1/2 and general Liouvillians; L, \, E, C, B solvers; MOMD). Default nargout 2. plot=True replaces MATLAB's nargout=0 plot. Opt.Diagnostics is stored in `chili.DIAGNOSTICS[name]`, not the base workspace. The Opt.Rescale and director-phi errors are fixed (DEVIATIONS.md); module flags `EASYSPIN_RESCALE` and `EASYSPIN_DIRECTOR_PHI` restore EasySpin's numbers. MATLAB bicgstab is `_matlab.bicgstab`. Opt.BasisAnalysis raises, as in EasySpin.
+- `clebschgordan(varargin)` -> value: Clebsch-Gordan coefficient
+- `clight()` -> c: Speed of light
+- `commute(A, B)` -> C: Commutator of two matrices
+- `convspec(spec, steps, fwhm, deriv, alpha, phase)` -> out: Spectrum convolution with line shapes
+- `crystalfield(varargin)` -> varargout:  (obsolete: raises ValueError naming the replacement)
+- `ctafft(TD, Averages, N)` -> FD: Cross-term averaged FFT
+- `curry(Sys, Exp, Opt, nargout=None)` -> varargout: Computation of magnetometry data (magnetic moment, susceptibility) (outputs in Opt.Output keyword order: one value, or a tuple; default nargout = number of Opt.Output keywords, else 2 -> (muBM, chimol); nargout=0 returns None and does not plot; T=0 population fix, DEVIATIONS.md)
+- `datasmooth(y, m, Method, PolyOrder, Derivative)` -> y_filtered: Moving average smoothing and differentiation
+- `degree()` -> d: Conversion between radians and degrees
+- `deriv(varargin)` -> dydx: Derivative of a vector or matrix
+- `dipbackground(t, conc_uM, lambda_, plot=False)` -> Vinter: Intermolecular dipolar background decay (plot=True replaces MATLAB's nargout=0 plot)
+- `dipkernel(t, r, gAB)` -> K: Kernel matrix for DEER (numel(t) x numel(r); times dr for several r; checked against quadrature)
+- `diptensor(spin1, spin2, rvec)` -> T: Dipolar coupling tensor between two spins (spin = g scalar/3-vector/3x3, list [gpv, gFrame], or isotope string; a list of plain numbers counts as numeric)
+- `easyspin(str)` -> varargout: Toolbox for Electron Paramagnetic Resonance (EPR)
+- `echarge()` -> e: Elementary charge
+- `eeint(varargin)` -> varargout:  (obsolete: raises ValueError naming the replacement)
+- `eigfields(varargin)` -> varargout:  (obsolete: raises ValueError naming the replacement)
+- `emass()` -> me, sigma: Electron mass
+- `endorfrq(Sys, Exp, Opt=None, nargout=4)` -> Pdat, Idat, Transitions, Info: ENDOR frequencies/intensities by matrix diagonalization (intensities only for nargout>1; nargout=0 -> Pdat alone; dbstack salt check = caller frame name)
+- `endorfrq_perturb(Sys, Exp, Opt=None)` -> EndorFreqs, EndorIntensities, Transitions, Info: ENDOR frequencies by perturbation theory (always a 4-tuple; 2nd-order quadrupole term corrected, DEVIATIONS.md)
+- `eprconvert(Freq, Field, g, FreqUnit='GHz', FieldUnit='mT')` -> Struct(FreqSI, FieldSI, g, FreqList, FieldList): Frequency/field/g value conversion (headless replacement of the GUI; eV factor corrected, DEVIATIONS.md)
+- `eprload(FileName, Scaling='', nargout=3)` -> Data | (x, Data) | (x, Data, Pars) | (x, Data, Pars, FileName): Load experimental EPR data (default nargout 3; cells -> lists; no dialog, no plot)
+- `eprsave(filename, x, data, TitleString='', mwFreq=nan)` -> -: Save data in Bruker BES3T format (BES3T 1.2, big-endian float64, .XGF/.YGF for nonlinear axes)
+- `eps0()` -> e, sigma: Electric constant, vacuum permittivity
+- `equivcouple(I, n)` -> F, N: Combination of equivalent spins
+- `equivsplit(I, n)` -> Intensity: Equivalent nuclei: EPR splitting pattern
+- `erot(varargin)` -> varargout: Rotation/transformation matrix from Euler angles (erot(*angles, opt, nargout=None) -> R; with rows/cols option nargout=3 -> three 3x1 vectors)
+- `eschecker(varargin)` -> varargout: EasySpin expiry checker
+- `esfit(data, fcn, p0, *varargin, rng=None)` -> result: Least-squares fitting (headless; no GUI or plot; varargin = pvary[, Opt] or lb, ub[, Opt]; model output: last tuple element, or spc for pepper/garlic/chili/salt; parameter vectors are 1-D; global-fit fields are lists; rng = numpy Generator/RandomState, default global numpy stream (np.random.seed(s) == MATLAB rng(s) for rand); FD stencil kept in bounds and diff/fft targets corrected, DEVIATIONS.md)
+- `esfit_genetic(fcn, lb, ub, FitOpt, rng=None)` -> bestx, info: Genetic algorithm (randi draws differ from MATLAB's)
+- `esfit_grid(fcn, lb, ub, FitOpt, rng=None)` -> bestx, info: Grid search (randGrid order from rng.permutation)
+- `esfit_levmar(fcn, x0, lb, ub, FitOpt, rng=None)` -> x, info: Levenberg-Marquardt (FD steps kept below ub, DEVIATIONS.md)
+- `esfit_montecarlo(fcn, lb, ub, FitOpt, rng=None)` -> bestx, info: Monte Carlo search (MATLAB-identical draws with RandomState(seed))
+- `esfit_simplex(fcn, x0, lb, ub, FitOpt, rng=None)` -> x, info: Nelder-Mead simplex (RandomStart from rng)
+- `esfit_swarm(fcn, lb, ub, FitOpt, rng=None)` -> gX, info: Particle swarm (MATLAB-identical draws with RandomState(seed))
+- `eulang(R, nocheck)` -> varargout: Euler angles from rotation matrix (eulang(R, nocheck=None, nargout=None) -> 1x3 array, nargout=3 -> 3 floats)
+- `euler2quat(varargin)` -> q: Convert Euler angles to unit quaternions.
+- `evolt()` -> eV: Electron volt (unit of energy) (ported in T2)
+- `evolve(Sig, Det, Ham, n, dt, IncScheme=1, Mix=None)` -> Signal: Time-domain evolution of density matrix (list of signals for several detectors; stale adjoint in [1 2 1], [1 2 2 1], [1 2 -2 1] corrected, DEVIATIONS.md)
+- `ewrls(data, p, lambda_, nPreAvg=0, delta=100, direc='fb', plot=False)` -> y: Exponentially weighted recursive least squares adaptive filter (y is nPoints x 1)
+- `exciteprofile(t, IQ, offsets=None, nargout=2, plot=False)` -> (offsets, Mag): Excitation profile of an arbitrary pulse (vectorised over offsets; Mag 3 x n; plot=True replaces the GUI)
+- `exponfit(x, yData, nExponents, noconst)` -> varargout: Fits exponential(s) to 1D and 2D data (returns (k, c, yFit) always)
+- `faraday()` -> F: Faraday constant
+- `fastmotion(System, Field, tau20, domain='field')` -> lw, mI, coeffs: Computes linewidth parameters for fast-motion regime (always the 3-tuple; lw column (mT or MHz); without nuclei lw is the scalar A and mI is empty (MATLAB leaves it unassigned))
+- `fdaxis(varargin)` -> FreqAxis: Frequency domain axis
+- `fieldmod(B, spc, ModAmp, Harmonic)` -> varargout: field modulation (returns the in-phase spectrum; plot=True keyword for the figure)
+- `gammae()` -> value, sigma: Electron gyromagnetic ratio
+- `garlic(Sys, Exp, Opt, nargout=None, plot=False)` -> varargout: Simulates isotropic and fast-motion cw EPR spectra (default nargout 2 -> (x, spec); 1 -> spec; 3 -> (x, spec, info); plot=True calls cwepr_plot; passes F.garlic to compisoloop)
+- `gaussian(x, x0, fwhm, diff, phase)` -> y1, y2: Gaussian line shape (gaussian(x, x0, fwhm, diff=0, phase=0, nargout=None) -> y1; nargout=2 -> (y1, y2); diff=-1 dispersion via quad of scipy dawsn (MATLAB needs Symbolic toolbox))
+- `gfree()` -> g, sigma: Free electron g factor
+- `ham(SpinSystem, B0, opt)` -> varargout: Spin Hamiltonian (ham(Sys, B0=None, opt=None, nargout=None) -> H, (H0,muzL) or (H0,mux,muy,muz); nargout defaults to 1 with B0, 4 without)
+- `ham_cf(SpinSystem, idxL, opt)` -> H: Crystal-field Hamiltonian for the orbital angular momentum
+- `ham_ee(System, Spins, opt)` -> Hee: Electron-electron spin interaction Hamiltonian
+- `ham_ez(SpinSystem, varargin)` -> varargout: Electron Zeeman interaction Hamiltonian (ham_ez(Sys, *varargin, nargout=None): nargout=1 -> H(B0), 3 -> (mux,muy,muz); default 1 if first extra arg has 3 elements)
+- `ham_ezho(SpinSystem, varargin)` -> varargout: Multiple Order Zeeman interaction Hamiltonian (numeric form always returns scipy.sparse (as MATLAB); tensor cells are column-major lists (G2: 9, G3: 27))
+- `ham_hf(System, elSpins, nucSpins, opt)` -> Hhf: Hyperfine interaction Hamiltonian
+- `ham_nn(System, nucSpins, opt)` -> Hnn: Nuclear-nuclear spin interaction Hamiltonian
+- `ham_nq(SpinSystem, Nuclei, Options)` -> Hnq: Nuclear quadrupole interaction Hamiltonian
+- `ham_nz(SpinSystem, varargin)` -> varargout: Nuclear Zeeman interaction Hamiltonian (same nargout rule as ham_ez)
+- `ham_oz(SpinSystem, varargin)` -> varargout: Orbital Zeeman interaction Hamiltonian (same nargout rule as ham_ez)
+- `ham_so(System, eSpins, opt)` -> H: Spin-orbit interaction Hamiltonian
+- `ham_zf(SpinSystem, idxElectrons, opt)` -> H: Electronic zero field interaction Hamiltonian
+- `hamsymm(Sys, varargin)` -> PGroup, RMatrix: Determine spin Hamiltonian symmetry (hamsymm(Sys, ['debug']) -> (PGroup, RMatrix))
+- `hartree()` -> E, sigma: Atomic unit of energy
+- `hbar()` -> value: Planck constant over 2 pi
+- `hfine(varargin)` -> varargout:  (obsolete: raises ValueError naming the replacement)
+- `hilberttrans(y)` -> y_h: Hilbert transform
+- `hsdim(SpinSystem)` -> nStates: Dimension on spin state space
+- `isotopologues(varargin)` -> varargout: Generate list of isotopologues (returns one Struct if there is one isotopologue, else a list of Structs (MATLAB struct-array rule); nargout=0 prints)
+- `isto(J, kq, sparseOpt)` -> T: Irreducible spherical tensor operators (ISTOs)
+- `isto2stev(k)` -> C: Transformation from ISTOs to Stevens operators
+- `larmorfrq(Nucs, Fields)` -> LarmFreq: Larmor frequency of nuclear spins
+- `levels(*varargin, nargout=None)` -> Energies, Vectors: Energy levels (levels(Sys, Ori, B) or levels(Sys, phi, theta, B); nargout=2 -> (Energies, Vectors); MATLAB squeeze applied)
+- `levelsplot(Sys, Ori='z', B=[0 1400], mwFreq=[], Opt, plot=True, ax=None)` -> Struct(B, E, fieldUnit, energyUnit, resonFields, intensity, Transitions, transE, transColor[, axes]): Plot energy level (Zeeman) diagram (matplotlib; returns the plotted data; no hover callbacks)
+- `lorentzian(x, x0, fwhm, diff, phase)` -> y1, y2: Lorentzian line shape (nargout=None -> y1, nargout=2 -> (y1, y2))
+- `lpsvd(data, time, method='ss', order='mdl')` -> (y, parameters): Linear prediction SVD fit (parameters.model is a Python callable; checked on synthetic data)
+- `lshape(x, x0, fwhm, varargin)` -> y: Gaussian and Lorentzian line shapes
+- `makespec(Range, nPoints, Positions, Amplitudes)` -> varargout: Construct stick spectrum from peak data (nargout=2 -> (x, spec))
+- `mdhmm(dihedrals, dt, nStates, nLag, Opt=None, rng=None)` -> HMM: Hidden Markov model of MD dihedral trajectories (k-means seeds from rng; L-BFGS-B from SciPy)
+- `mdload(TrajFile, TopFile, Info=None, Opt=None)` -> MD: Load MD trajectories (.dcd+.psf, .trr+.gro; R1, TOAC): label frames, dihedrals, protein-diffusion removal
+- `mhz2mt(value_MHz, g)` -> value_mT: Conversion from MHz to mT
+- `mlpsvd(data, time, method='ss', order='mdl', method2d='sum')` -> (y, parameters): LPSVD down one dimension of a 2D array (model callable; checked on synthetic data)
+- `molgas()` -> R: molar gas constant
+- `mt2mhz(value_mT, g)` -> value_MHz: Conversion from mT to MHz
+- `mu0()` -> m, sigma: Magnetic constant, vacuum permeability
+- `nmagn()` -> mu_n, sigma: Nuclear magneton
+- `nmass()` -> mn, sigma: neutron mass
+- `nnint(varargin)` -> varargou:  (obsolete: raises ValueError naming the replacement)
+- `nquad(varargin)` -> varargout:  (obsolete: raises ValueError naming the replacement)
+- `nucabund(varargin)` -> w: Natural abundances of nuclear isotopes
+- `nucdata(Isotopes)` -> varargout: Nuclear spin data (always a 5-tuple (Spin, gn, qm, Abund, Nucs) of 1-D arrays; no input -> the isotope table Struct)
+- `nucfrq2d(Sys, B0, tau=0, plot=False)` -> Struct: HYSCORE powder outline (MATLAB only plots; the port returns FreqsAlpha, FreqsBeta, LarmorFreqs, maxFrq, freq/Modulation (tau>0), grid, tri; plot=True draws)
+- `nucgval(varargin)` -> gn: Nuclear g value
+- `nucqmom(varargin)` -> Q: Nuclear electric quadrupole moments
+- `nucspin(varargin)` -> I: Nuclear spin quantum number
+- `nucspinadd(Sys, Nuc, A, AFrame, Q, QFrame)` -> NewSys: Adds a nuclear spin to a spin system
+- `nucspinkeep(Sys, keepidx)` -> NewSys: Remove nuclear spins from spin system
+- `nucspinrmv(Sys, rmvidx)` -> NewSys: Remove nuclear spin from spin system
+- `orca2easyspin(OrcaOutput, HyperfineCutoff=0)` -> Sys: Import spin Hamiltonian parameters from ORCA (main output or binary .prop; _property.txt rejected as in EasySpin 6.0.12; frames may differ from MATLAB by eigenvector signs, same tensors)
+- `oripotentialplot(Potential, population=False, alphabeta=True, plot=True, ax=None)` -> Struct(vecs, tri, alpha|gamma, beta, P, title, coeffs[, Z, axes]): Plot orientational potential (keywords replace the toggle buttons; Z by converged trapezoid/Gauss-Legendre quadrature)
+- `orisel(Sys, Params, Options=None, nargout=1, plot=False)` -> weights | (Weights, Transitions): Orientation selection weights
+- `pepper(Sys, Exp, Opt=None, nargout=2, plot=False)` -> spec | (xAxis, spec) | (xAxis, spec, info): cw EPR spectra of powders and crystals (matrix, eigenfields, perturbation, hybrid; separate components/transitions/orientations/sites; plot=True replaces MATLAB's nargout=0 plot)
+- `photoselect(tdm, ori, k, alpha)` -> weight: Photoselection weights (1 x nOri)
+- `planck()` -> h: Planck constant
+- `plegendre(varargin)` -> y: Legendre polynomials and associated Legendre polynomials
+- `pmass()` -> mp, sigma: Proton mass
+- `propint(H0, H1, tlim, Freq, Phase=0, nIntervals=256, nargout=None)` or `propint(Ustore, tlim, Freq, Phase=0)` -> U | (U, Ustore): Compute propagation operator (Ustore path off-by-one corrected, DEVIATIONS.md)
+- `pulse(Par, Opt=None, nargout=2, plot=False)` -> (t, IQ) | (t, IQ, modulation): Pulse definition (default nargout 2; nargout=3 adds modulation; plot=True = MATLAB nargout=0; coefficient databases embedded; all-zero imaginary IQ returned real, as MATLAB)
+- `quat2euler(varargin)` -> varargout: Convert a unit quaternion into a sequence of Euler angles (nargout keyword as eulang)
+- `quat2rotmat(q)` -> mat: Convert unit quaternions to rotation matrices.
+- `quatinv(q)` -> qinv: Invert a unit quaternion.
+- `quatmult(q, r)` -> t: Perform quaternion multiplication.
+- `quatvecmult(q, v)` -> r: Rotate a vector using a unit quaternion.
+- `rapidscan2spc(M, rsAmp, rsFreq, g=gfree, plot=False)` -> (dB, spc): Sinusoidal rapid-scan signal to EPR spectrum
+- `rcfilt(y, SampleTime, TimeConstant, UpDown)` -> varargout: Apply an RC filter to a signal (returns the filtered data (no plot))
+- `rescaledata(varargin)` -> varargout: Rescaling of data (returns (yscaled, scalefactor); no plotting)
+- `resfields(Sys, Exp, Opt=None, nargout=4)` -> (Pdat, Idat, Wdat, Transitions, Gdat): Resonance fields by matrix diagonalization with adaptive segmentation (nargout controls intensities/widths/gradients; Transitions 1-based; dbstack pepper check = caller frame name; hybrid-nuclei intensity/shift pairing corrected (DEVIATIONS.md, flag `resfields.EASYSPIN_HYBRID_PAIRING`))
+- `resfields_eig(Sys, Exp, Opt=None, nargout=2)` -> (EigenFields, Intensities): Resonance fields by the eigenfield method (always the general QZ problem, as EasySpin effectively does)
+- `resfields_perturb(Sys, Exp, Opt=None)` -> B, Int, Wid, Transitions, spec: Resonance fields by 1st/2nd order perturbation theory (always a 5-tuple; dbstack pepper check = caller frame name; fixes in DEVIATIONS.md)
+- `resfreqs_matrix(Sys, Exp=None, Opt=None, nargout=4)` -> Pdat, Idat, Wdat, Transitions: Resonance frequencies by matrix diagonalization (nargout controls intensities (>1), strain widths (>2) and intensity post-selection; always a 4-tuple, [] where not computed; FuzzLevel noise from a numpy generator)
+- `resfreqs_perturb(Sys, Exp, Opt=None)` -> nu, Int, Wid, Transitions, spec: Resonance frequencies by perturbation theory (always a 5-tuple; Opt.ImmediateBinning raises ValueError; fixes in DEVIATIONS.md)
+- `resonator(t0, signal0, mwFreq, nu0|freq, QL|H, option, Opt=None)` -> (t, signal): Simulation of, or compensation for, the resonator (ideal or measured transfer function; MATLAB fminsearch reimplemented)
+- `resonatorprofile(nu, nu0, Qu, beta=None, type, nargout=1, plot=False)` -> out | (nu, out): Resonator profile (4-argument form resonatorprofile(nu, nu0, Qu, type) accepted; H(nu=0) = 0 as in MATLAB)
+- `rfmixer(t, signal, mwFreq, type, Opt=None, nargout=2, plot=False)` -> (tOut, signalOut): Digital up- or downconversion (DSB/USB/LSB/IQmod/IQdemod/IQshift; outputs 1 x N)
+- `rotateframe(ang0, nRot, rho)` -> ang, R: Rotate a frame around a given axis
+- `rotaxi2mat(n, rho)` -> R: Compute rotation matrix from rotation axis and rotation angle
+- `rotmat2axi(R)` -> n, rho: Rotation axis and angle form rotation matrix
+- `rotmat2quat(mat)` -> q: Convert rotation matrices to unit quaternion. (orthogonality check computed inline instead of via multimatmult)
+- `rotview(R | [a b g] | a, b, g, label=1, showTensor=True, plot=True, sliders=True)` -> Struct(alpha, beta, gamma (deg), R, frame vectors, planes, matrix, labels, tensor[, fig, axes]): Display rotation between two frames (matplotlib 3D + angle sliders; label/ellipsoid are keywords)
+- `runprivate(fname, varargin)` -> varargout: a function from the private/ subfolder
+- `rydberg()` -> Rinf, sigma: Rydberg constant
+- `saffron(Sys, Exp, Opt=None, nargout=None, plot=False)` -> data | (x, data) | (x, data, info): Simulate pulse EPR signals and spectra (default nargout 2; 2-D x is a list [t1, t2]; info has f/f1/f2, fd, td (fast) or SinglePointDetection (thyme); plot=True runs the nargout-0 branch with matplotlib and still returns (x, data); passes F.saffron to compisoloop)
+- `salt(Sys, Exp, Opt, nargout=None, plot=False)` -> varargout: ENDOR spectra simulation (same nargout rule as garlic; plot=True plots with matplotlib; passes F.salt to compisoloop)
+- `sham(varargin)` -> varargout:  (obsolete: raises ValueError naming the replacement)
+- `sigeq(Ham, Temp, 'pol'=None)` -> sigma: Thermal equilibrium spin density (scipy expm)
+- `signalprocessing(TimeAxis, RawSignal, FreqTranslations)` -> ProcessedSignal: Signal translation and clean up for spidyan (rfmixer called through F; error path returns raw signal with a warning, as MATLAB)
+- `soint(varargout)` -> varargout:  (obsolete: raises ValueError naming the replacement)
+- `sop(SpinSystem, varargin)` -> varargout: Spin operator matrices (sop(spins_or_Sys, *specs, nargout=None); several specs -> tuple; sparse = scipy CSR)
+- `spherharm(L, M, theta, phi, Type)` -> y: Complex- and real-valued spherical harmonics
+- `sphgrid(Symmetry, GridSize, Options)` -> grid, tri: Spherical grid (sphgrid(Symm, GridSize, Options=None, nargout=None) -> grid Struct, nargout=2 -> (grid, tri); triangulation via scipy Delaunay (DEVIATIONS.md))
+- `sphrand(N, nOctants)` -> varargout: Generate random points over unit sphere (numpy RNG (keyword rng), values differ from MATLAB rand)
+- `spidyan(Sys, Exp, Opt=None, nargout=None, plot=False)` -> Signal | (TimeAxis, Signal) | (TimeAxis, Signal, info): Simulate spin dynamics during pulse EPR experiments (default nargout 2; plot=True runs the nargout-0 checks and s_plotting and still returns the outputs)
+- `spinladder(Sys, Temperature)` -> varargout: Manifold Hamiltonian of a spin ladder (spinladder(Sys, T=None, nargout=2); nargout=0 prints)
+- `spinvec(System)` -> vec: Spin quantum numbers
+- `stackplot(x, y, scale='maxabs', step=1.5, sliceLabels, colors, plot=True, ax=None)` -> Struct(x, yplot, shift, colors, h): Stacked plot of data (h = matplotlib lines = MATLAB's output; viridis replaces parula)
+- `stev(Spins, Comps, Sparse)` -> Op: Extended Stevens spin operator matrices (reproduces the MATLAB Op(abs(Op(find(Op)))<1e-14)=0 linear-index quirk)
+- `stochtraj_diffusion(Sys, Par=None, Opt=None, nargout=3, rng=None)` -> (t, RTraj) | (t, RTraj, qTraj): Stochastic rotational-diffusion trajectories (random steps from rng; nargout=0 returns None, no plot; start orientations for [L M K lambda] potentials include sin(beta), DEVIATIONS)
+- `stochtraj_jump(Sys, Par=None, Opt=None, nargout=3, rng=None, u=None)` -> (t, stateTraj or RTraj) | (t, RTraj, qTraj) | (t, RTraj, qTraj, stateTraj): Markov jump trajectories (draws from rng; u: given uniform draws; nargout=0 returns None, no plot)
+- `tensor_cart2sph(Tc)` -> T0, T1, T2: Irreducbile spherical tensors from rank-2 cartesian tensor
+- `tensor_sph2cart(T0, T1, T2)` -> T: Rank-2 cartesian tensor from irreducible spherical tensors
+- `transmitter(signal0, Ain, Aout, option)` -> signal: Transmitter nonlinearity, simulated or compensated (V\Aout via lstsq; not-a-knot spline)
+- `unitconvert(value, units, g)` -> out: Unit conversion tool
+- `vec2ang(varargin)` -> phi, theta: Convert cartesian vectors to polar angles (vec2ang(...) -> (phi, theta) (floats for one vector); nargout=1 -> [phi; theta])
+- `voigtian(x, x0, fwhmGL, diff, phase)` -> y1, y2: Voigtian line shape function (nargout=None -> y1, nargout=2 -> (y1, y2))
+- `wigner3j(varargin)` -> value: Wigner 3-j symbol (method 'b' uses Python big integers in place of java.math)
+- `wigner6j(varargin)` -> value: Wigner 6j symbol
+- `wignerd(J, varargin)` -> D: Wigner rotation matrices (explicit J<=4 formulas in _wignerd_tab.py (generated by tools/gen_wignerd_tab.py))
+- `zeeman(varargin)` -> varargout:  (obsolete: raises ValueError naming the replacement)
+- `zeemanho(varargin)` -> varargout:  (obsolete: raises ValueError naming the replacement)
+- `zfield(varargin)` -> varargout:  (obsolete: raises ValueError naming the replacement)
+- `zfsframes(varargin)` -> -: D tensor in various frame conventions (prints only)
+
+## Internal functions (124)
+
+- `adddefaults(UserStruct, DefaultStruct)` -> SupplementedStruct: Add default fields to user structure
+- `allclose(varargin)` -> result: Check if ALL entries between two arrays agree within a
+- `allcombinations(varargin)` -> Result: 
+- `anisosubsys(Sys, lw=None)` -> subSys: Sub-system responsible for anisotropy (salt pre-selection)
+- `autocorrfft(x, dim=[], normalized=True, vector=0, centered=True)` -> AutoCorr: Autocorrelation function using the FFT (= crosscorrfft(x, x, ...))
+- `cardamom_estimatedifftensor(RTraj, dt, stopFitT)` -> Diff, msadp, tLag: Estimate the rotational diffusion tensor from a frame trajectory (orientation trajectory relative to frame 1 instead of EasySpin's step increments, DEVIATIONS; flag `EASYSPIN_INCREMENTS`)
+- `cardamom_propagatedm(Sys, Par, Opt, MD, omega, CenterField, cache=None)` -> Sprho: Propagate the spin density matrix along the trajectories ('fast' and 'ISTOs'; EasySpin's persistent caches live in the dict `cache`, which cardamom passes per run; the per-step expm_(.., 'eig') calls are batched)
+- `cardamom_rejectionsample3d(pdf, xGrid, yGrid, zGrid, nSamples, rng=None)` -> xSamples, ySamples, zSamples: Rejection sampling from a 3-D grid pdf (batched numpy draws; statistically equivalent)
+- `cardamom_sobol_generate(m, n, skip)` -> r: Sobol points (Burkardt i4_sobol, persistent state kept; m x n)
+- `cardamom_tensortraj(T, RTraj, RTrajInv)` -> TTraj: Tensor trajectory R*T*R' from a rotation-matrix trajectory
+- `chili_basisbuild(Basis, Sys)` -> Basis: Freed-ordered K-symmetrized basis: adds L, jK, K, M, pS, qS[, pI1, qI1[, pI2, qI2]] column vectors
+- `chili_conjgrad(A, b, shift=0)` -> x, T0, T1, err, stepsDone: Conjugate gradients on the complex-symmetric system with the bilinear inner product; returns the equivalent Lanczos tridiagonal T0/T1 (always all 5 outputs).
+- `chili_contfracspec(z, alpha, beta, k=numel(alpha), useLentz=False)` -> spec: Continued-fraction spectrum, right to left or Lentz.
+- `chili_eqpopvec(basis, Potential, Opt)` -> sqrtPeq, nIntegrals: sqrt(Peq) over the LMK/LMKjK basis (sparse); integrals use reimplementations of MATLAB integral/integral2/integral3 (bitwise-level parity)
+- `chili_lanczos(A, b, z, Opt)` -> spec, converged, specchange: Lanczos tridiagonalization (bilinear form, no reorthogonalization) with the Lentz continued fraction. With Opt.Lentz=false the spectrum is evaluated on z (DEVIATIONS.md).
+- `chili_lm(Sys, basisopts, Dynamics, allocation)` -> r, c, Vals, nRows: mex rewritten in numba (line-by-line C port); 1-based COO triplets of Gamma - i*L; one argument returns None
+- `chili_startingvector(Basis, lambda_)` -> stvec: sparse unit starting vector; potential integrals via the MATLAB-integral port
+- `chili_xlmk(Potential, R)` -> X: X^L_MK coefficients as a list (cell) of (2L+1)^2 matrices; [] without potential
+- `chkmlver()` -> msg: Check MATLAB version for EasySpin
+- `compisoloop(simfcn, Sys, Exp, Opt, autoRange, thirdOutput, separateSpectra)` -> (x, spec, info): Loops over components and isotopologues; calls simfcn(Sys_, Exp, Opt, nargout=3) with Sys_.singleiso
+- `crosscorrfft(x, y, dim=[], normalized=1, vector=0, centered=1)` -> CrossCorr: Cross-correlation function using the FFT (dim and vector 1-based)
+- `cubicsolve(C, LoopFields=True)` -> (r, d1, d2): Real roots in [0,1] of a cubic (numba port of the mex; roots sorted, d1/d2 in solver order as in the mex)
+- `cwepr_plot(xAxis, spec, Exp)` -> None: matplotlib plot of a cw spectrum (stackplot for crystal rotations)
+- `diffsuperop(basis, R, XLMK, Potential)` -> Gamma: sparse diffusion superoperator, LMK or LMKjK basis
+- `diffsuperop_LMK(basis, R, XLMK, Potential, Method)` -> Gamma: LMK diffusion superoperator, methods 1 (M=0 potentials) and 2 (not called by chili in 6.0.12; potential term list built by concatenation, see Deviations)
+- `easyspin_compile()` -> -: directory containing mex source files
+- `easyspin_info()` -> varargout: Installation information and test
+- `elapsedtime(startTime, endTime)` -> hmsString, Hours, Minutes, Seconds: elapsed time between StartTime and EndTime (in seconds)
+- `elementno2symbol(no)` -> symbol: element number to element symbol.
+- `elementsymbol2no(symbol)` -> no: element symbol to element number.
+- `eprload_ActiveSpectrum(FileName)` -> Data, Abscissa, Parameters: (returns (Data, Abscissa, Parameters) as EasySpin)
+- `eprload_AdaniDAT(FileName)` -> Data, Abscissa, Parameters: (returns (Data, Abscissa, Parameters) as EasySpin)
+- `eprload_AdaniJSON(FileName)` -> Data, Abscissa, Parameters: (returns (Data, Abscissa, Parameters) as EasySpin)
+- `eprload_BrukerBES3T(FullBaseName, FileExtension, Scaling)` -> Data, Abscissa, Parameters: (returns (Data, Abscissa, Parameters) as EasySpin)
+- `eprload_BrukerESP(FullBaseName, FileExtension, Scaling)` -> Data, Abscissa, Parameters: (returns (Data, Abscissa, Parameters) as EasySpin)
+- `eprload_d00WISETH(FileName)` -> Data, Abscissa, Parameters: (returns (Data, Abscissa, Parameters) as EasySpin)
+- `eprload_jeol(FileName)` -> Data, Abscissa, Parameters: Reads in data from JEOL files (returns (Data, Abscissa, Parameters) as EasySpin)
+- `eprload_MagnettechBinary(FileName)` -> Data, Abscissa, Parameters: (returns (Data, Abscissa, Parameters) as EasySpin)
+- `eprload_MagnettechXML(FileName)` -> Data, Abscissa, Parameters: (returns (Data, Abscissa, Parameters) as EasySpin)
+- `eprload_MAGRES(FileName)` -> Data, Abscissa, Parameters: (returns (Data, Abscissa, Parameters) as EasySpin)
+- `eprload_qeseETH(FileName)` -> Data, Abscissa, Parameters: (returns (Data, Abscissa, Parameters) as EasySpin)
+- `eprload_specman(FileName)` -> Data, Abscissa, Parameters: Read data from .d01/.exp SpecMan data files (returns (Data, Abscissa, Parameters) as EasySpin)
+- `eprload_VarianE9ETH(FileName)` -> Data, Abscissa, Parameters: (returns (Data, Abscissa, Parameters) as EasySpin)
+- `esfit_algdefaults(algorithm)` -> FitOpt, info: Default options of the esfit algorithms (MATLAB [] -> None)
+- `esfit_argsparams()` -> funcs: Struct of parameter-mapping helpers (getparaminfo, setparamvalues (deep copy), getparamvalues (1-D), checkparcompatibility, parinfoequal, validargs; numeric lists = arrays, lists holding arrays/str/structs = cells)
+- `esspline1d(y, EndCon=0, xx=None)` -> pp Struct | values: Fast cubic spline over 1..n (EndCon 0/1/2); pp as mkpp
+- `esspline2d(data, ri, ci, EndCon=[0,0])` -> values: Fast bicubic spline on the index grid
+- `expm_(A, algo='orig')` -> C: Matrix exponential, using multiple algorithms ('orig' = scipy.linalg.expm; 'fast' exact norm(A^m,1) instead of normest1 for n >= 50)
+- `eyekron(varargin)` -> K: Kronecker product with identity matrix
+- `faddeeva(z, N)` -> w: Faddeeva function
+- `fresnelC(X, fresnelType=0)` -> FCint: Fresnel cosine integral C, C1 or C2 (EasySpin spline table from _Fresnel_data_.mat, falling back to scipy.special.fresnel)
+- `fresnelS(X, fresnelType=0)` -> FSint: Fresnel sine integral S, S1 or S2 (as fresnelC)
+- `generateoribasis(Basis, basistype='LjKKM')` -> Basis: Orientational basis quantum numbers (LjKKM/LMKjK/LMK)
+- `getdstrainops(Sys)` -> (useDStrain, dHdD, dHdE): D/E strain operators per electron spin (lists = MATLAB cells; correlated strain via the 2x2 covariance eigenvectors)
+- `gethamdata(B, H0, muzL, idxT, nLevels)` -> V, E, dEdB, dE: diagonalization (sparse and dense) used by resfreqs_matrix and resfields (eigenvectors compared modulo column phase (DEVIATIONS.md))
+- `gethamdata_hO(B, n0, Sys, sparse, idxT, nLevels)` -> V, E, dEdB, dE: diagonalization (sparse and dense) (eigenvectors compared modulo column phase (DEVIATIONS.md))
+- `getmatrix(FileName, Dims, NumberFormat, ByteOrder, isComplex)` -> out: (drops trailing singleton dims (T5))
+- `gridinterp(y, gridParams, phi, theta, InterpType='G3')` -> values: Interpolation of grid data (G3/L3/G1/L1; interp2 'linear' with grid-line handling as MATLAB)
+- `gridparam(PointGroup)` -> varargout: Get grid parameter for a given point group symmetry (returns (maxPhi, closedPhi, nOctants))
+- `hccm(J, res, mode)` -> C: Heteroscedasticity-consistent covariance matrix (HC2-HC5 elementwise for row residuals)
+- `hil2liouv(H)` -> HL: commutation superoperator kron(I,H) - kron(H.',I); list in, list out
+- `histcountsn(X, edges)` -> n, bin: N-dimensional histogram counts (MATLAB discretize/histcounts semantics)
+- `istotensor(a, b)` -> T0, T1, T2: Irreducbile spherical tensor operator from 2 vector operators
+- `jacobianest(fun, x0, MaxRelStep=0.01, lb=None, ub=None)` -> jac, err: Romberg finite-difference Jacobian (lb/ub: one-sided stencil at the bounds, DEVIATIONS.md)
+- `jjjsymbol(evenLmax, oddLmax, computeRank1)` -> jjj0, jjj1, jjj2: takes the maximum rank of the orientational basis as input and (jjj1 = 0x0 array when computeRank1 is false)
+- `kroneye(varargin)` -> K: Kronecker product with identity matrix
+- `ksymmetrizer(basis)` -> T: sparse LMK -> LMKjK transformation (checked unitary and against diffsuperop/liouvhamiltonian)
+- `letter2vec(s)` -> n: a string shorthand for an direction to the corresponding unit vector.
+- `liouvhamiltonian(basis, Q0, Q1, Q2, jjj0, jjj1, jjj2)` -> H: Hamiltonian superoperator in the LMKjK basis; Q1/Q2 cells as column-major lists (rank-1 part corrected, DEVIATIONS.md)
+- `liouvhamiltonian_LMK(basis, Q0, Q1, Q2, jjj0, jjj1, jjj2)` -> H: same in the LMK basis (rank-1 part corrected, DEVIATIONS.md)
+- `lisum1i(varargin)` -> varargout: (mex routine) (numba port of private/lisum1i.c, bit-identical to the C routine)
+- `logmsg(varargin)` -> -: EasySpin logging
+- `magint(System, SpinOps, CenterField, includeNuclearZeeman, includeNuclearQuadrupole, explicitFieldSweep)` -> T, F, System, Symmetry, isFieldDep: ISTO components of all interactions; T.T1/T.T2 are column-major lists of the nInt x 3/5 cells; SpinOps is the nSpins x 3 cell as a column-major list
+- `md_readdcd(FileName, idx=[])` -> Traj: Read a DCD trajectory (xyz nFrames x 3 x nAtoms, dt, nAtoms, nFrames; CHARMMextrablock defaults to 0, DEVIATIONS)
+- `md_readgro(GroFile, ResName, LabelName, AtomNames)` -> data: Read a Gromos87 .gro structure file
+- `md_readpsf(FileName, SegName, ResName, LabelName, AtomNames)` -> psf: Read a PSF structure file (textscan field widths emulated)
+- `md_readtrr(trrfile)` -> Traj: Read a Gromacs .trr trajectory (in memory, no temporary files; coordinates via single precision as in EasySpin)
+- `md_savedcd(FileName, Traj, Opt=None)` -> -: Save an X-PLOR DCD file readable by md_readdcd (EasySpin's version cannot write; DEVIATIONS)
+- `mdhmm_em(data, initDistr, TransProb, mu, Sigma, verbosity)` -> logLikIter, eqDistr, TransProb, mu, Sigma: Baum-Welch EM for a periodic Gaussian HMM (multi-trajectory mu/Sigma updates fixed, DEVIATIONS; flag `EASYSPIN_LAST_TRAJECTORY`)
+- `mdhmm_kmeans(data, nClusters, nRepeats=1, centroids0=[], verbosity=0, rng=None)` -> idxBest, centroidsBest: Periodic k-means with k-means++ seeds (random draws from rng)
+- `mdhmm_lbfgsb(fcn, l, u, opts=None)` -> x, f, info: Bound-constrained minimisation (fcn(x) -> (f, g)); SciPy L-BFGS-B via mdhmm_lbfgsb_wrapper
+- `mdhmm_lbfgsb_wrapper(m, x, l, u, nbd, fcn, factr, pgtol, iprint, maxIts, maxTotalIts)` -> f, x, taskInteger, outer_count, k: L-BFGS-B driver (replaces the mex with scipy.optimize L-BFGS-B, same settings)
+- `mdtraj2oripot(FrameTraj, nBins=90)` -> potential, pdf: Orientational potential from an MD frame trajectory (smooth3 'gaussian' emulated)
+- `multimatmult(A, B)` -> C: Matlab gateway function to 3D matrix multiplication C
+- `multimatmult_(A, B)` -> C: (mex routine) numba port of multimatmult_.c, bit-identical
+- `multinucstick(B0, nStates, shifts, startPos, deltaPos, nPoints)` -> spec: (mex routine) (numba port of private/multinucstick.c; C truncation kept; the input shifts array is not modified)
+- `ndkron(A, B)` -> C: Kronecker product of two N-D arrays.
+- `nuclist2string(Nucs)` -> NucString: Generate isotope list string
+- `nucstring2list(NucString, ParseMode)` -> Nucs: a nuclear spin string to a cell array
+- `orca2easyspin_maintxt(mainfile)` -> Sys, info: Read EPR properties from main ORCA output file (UTF-16/UTF-8 BOM files decoded; several structures -> list of Sys; info.InputFile is a list of lines, not a char matrix)
+- `orca2easyspin_propbin(propfilename)` -> Sys: Read ORCA 3.x binary .prop file ([] for a terminator-only file)
+- `orca2easyspin_proptxt(propfilename)` -> Sys: Read EPR properties from ORCA _property.txt file (only directly reachable; files without a `$ Calculation_Info` section, such as the two scan test files, raise 'Spin multiplicity is missing', as EasySpin's code would)
+- `orifun_M2L(f, R_L2S, phi, theta, chi=None)` -> w: Orientation function on molecule-to-lab angles (12-point chi integration without chi)
+- `p_crystalorientations(Exp, Opt)` -> (angles_M2L, nOrientations, nSites, averageOverChi): Molecular-to-lab angles for all sample orientations and sites
+- `p_excitationgeometry(mwMode)` -> (xi1, xik, nB1, nk, nB0, mode): Microwave excitation geometry and mode flags
+- `p_gridsetup(Sys, Exp, Opt)` -> (Exp, Opt, nOrientations): Orientation grid (sphgrid) or crystal orientations
+- `p_samplerotation(Exp)` -> (R_L2S, rotatedSample): Lab-to-sample rotations (SampleFrame x SampleRotation)
+- `p_sampletype(Exp, Opt)` -> (Exp, Opt): Crystal/disordered/partially ordered sample setup; Exp.Ordering as a function of (alpha, beta, gamma)
+- `parsefieldparams(ParamsIn)` -> Pout: String fields -> float/1xN row/bool where sscanf('%e') parses them fully (ported in T5 for eprload)
+- `parseoption(Stru, Field, Values)` -> out, err: Fields specified as field Field in structure Stru, possibly
+- `pqorder(Spins)` -> idx, pq, mm: Liouville-basis reordering by coherence order (idx 1-based column; sortrows = stable lexsort)
+- `projecttriangles(Tri, Areas, Fun, Amplitude, x)` -> spec: numba port of the mex (truncation toward zero; real amplitudes; any integer Tri)
+- `projectzones(Position, Ampl, SegWeights, x)` -> spec: numba port of the mex (complex amplitudes supported)
+- `rbos(T, F, angles, isFieldDep)` -> Q0G, Q1G, Q2G, Q0F, Q1F, Q2F: Rotational basis operators for chili (cells as column-major lists of sparse Liouvillians)
+- `referenceisotope(el)` -> gref, qref: hyperfine and quadrupole reference isotopes for a given
+- `s_plotting(TimeAxis, Signal, Exp, Opt, draw=True)` -> Struct(kind, curves, xlabel, ylabel, zlabel, messages): Plotting of spidyan/saffron thyme signals (matplotlib; returns the plotted data)
+- `s_predefinedexperiments(Exp)` -> Exp: Thyme-mode pulse sequences of 2pESEEM, 3pESEEM, HYSCORE
+- `s_propagationsetup(Sys, Events, Opt)` -> Sys, Sigma0, DetOps, Events, Relaxation: Initial state, relaxation, excitation and detection operators (DetOps a list; Relaxation [] or Struct(Gamma, equilibriumState))
+- `s_relaxationsuperoperator(System)` -> Gamma: T1/T2 relaxation superoperator
+- `s_reorder_events(EventLengths, PulseList)` -> NewSequence, NewEventLengths: Time-order events of a sequence with moving pulses (1-based indices, lengths rounded to 1e-10)
+- `s_sequencer(Exp, Opt, nargout=None)` -> Events, Vary, Opt[, oldSyntax]: Pulse sequence parser (default nargout 3, as spidyan calls it; saffron asks for 4; N-D cells in Vary.Pulses are `_matlab.Cell`s)
+- `s_thyme(Sigma, Ham0, Det, Events, Relaxation=None, Vary=None)` -> TimeArray, SignalArray, FinalStates, StateTrajectories, Events: Time-domain propagation (arrays in MATLAB shape; cells as `Cell`; propagation steps in numba kernels; `Cell` is `_matlab.Cell`)
+- `sf_pathways(t, inc, nargout=None)` -> refocusingPathways: Refocusing coherence transfer pathways (nargout=0 or no input prints the table)
+- `sf_peaks(IncSchemeID, bufferRe, bufferIm, dt, idxFreeL, idxFreeR, Ea, Eb, G, D, ...)` -> -: (mex routine) numba port of sf_peaks.c; adds peaks to the float64 buffers in place (case 15 typo corrected, DEVIATIONS.md)
+- `sitetransforms(ID, vec)` -> out: Rotation matrices for space groups
+- `stochtraj_calcanistorque(LMK, lambda_, q)` -> torque: Torque of a Wigner-function orienting potential
+- `stochtraj_grstat(A)` -> stat: Gelman-Rubin R statistic
+- `stochtraj_proprottraj(q, Sim, iter, rng=None, randAngSteps=None)` -> q: Propagate quaternion trajectories (randAngSteps: given steps; Leimkuhler-Matthews draws nSteps+1 normals, DEVIATIONS)
+- `stochtraj_wignerdquat(L, M, K, q)` -> Del: Wigner D-matrix element from quaternions
+- `validate_dynord(program, Sys, FieldSweep, isDiffSim)` -> varargout: 'cardamom' -> Dynamics, 'stochtraj_diffusion' -> (Dynamics, Sim); the 'chili' branch raises, as in EasySpin
+- `validate_exp(program, Sys, Exp)` -> (Exp, FieldSweep, CenterField, CenterFreq, Sweep): Validate Exp for cardamom (the 'pepper' and 'chili' branches fail on undefined variables, as in EasySpin 6.0.12)
+- `validatespinsys(Sys)` -> FullSys, err: Validation of spin system structure (returns (FullSys, err); FullSys=None on error; numeric fields as 2-D ndarrays; Sys.B/BFrame are lists)
+- `wrappedgaussian(x, x0, fwhm, domain)` -> y: 'Wrapped' Gaussian function
+- `xml2struct(fileName)` -> s: Convert XML file into a MATLAB structure (minidom instead of Xerces; repeated elements -> list, 'Attributes', 'Text')

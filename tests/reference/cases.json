@@ -1,0 +1,50 @@
+{
+  "nitroxide_rigid": {
+    "function": "pepper",
+    "Sys": {"g": [2.0088, 2.0061, 2.0027], "Nucs": "14N", "A": [16, 16, 86], "lwpp": [0, 0.3]},
+    "Exp": {"mwFreq": 9.5, "Range": [328, 349], "nPoints": 2048},
+    "tol": 1e-6
+  },
+  "nitroxide_fastmotion": {
+    "function": "garlic",
+    "Sys": {"g": [2.0088, 2.0061, 2.0027], "Nucs": "14N", "A": [16, 16, 86], "tcorr": 1e-10, "lwpp": [0, 0.05]},
+    "Exp": {"mwFreq": 9.5, "Range": [332, 345], "nPoints": 2048},
+    "tol": 1e-6
+  },
+  "nitroxide_slowmotion": {
+    "function": "chili",
+    "Sys": {"g": [2.0088, 2.0061, 2.0027], "Nucs": "14N", "A": [16, 16, 86], "tcorr": 3e-9, "lwpp": [0, 0.1]},
+    "Exp": {"mwFreq": 9.5, "Range": [330, 347], "nPoints": 1024},
+    "tol": 2e-5
+  },
+  "copper_axial": {
+    "function": "pepper",
+    "Sys": {"g": [2.05, 2.05, 2.25], "Nucs": "63Cu", "A": [60, 60, 540], "lwpp": 1.0},
+    "Exp": {"mwFreq": 9.5, "Range": [250, 365], "nPoints": 4096},
+    "tol": 1e-6
+  },
+  "vanadyl": {
+    "function": "pepper",
+    "Sys": {"g": [1.98, 1.98, 1.94], "Nucs": "51V", "A": [190, 190, 530], "lwpp": 1.5},
+    "Exp": {"mwFreq": 9.5, "Range": [255, 445], "nPoints": 4096},
+    "tol": 1e-6
+  },
+  "manganese_ii": {
+    "function": "pepper",
+    "Sys": {"S": 2.5, "g": 2.0, "D": 300, "Nucs": "55Mn", "A": 250, "lwpp": 1.5},
+    "Exp": {"mwFreq": 9.5, "Range": [240, 440], "nPoints": 4096},
+    "tol": 1e-6
+  },
+  "proton_endor": {
+    "function": "salt",
+    "Sys": {"g": 2.0, "Nucs": "1H", "A": [2, 3, 8], "lwEndor": 0.1},
+    "Exp": {"Field": 350, "Range": [8, 22], "nPoints": 1024},
+    "tol": 1e-6
+  },
+  "proton_3p_eseem": {
+    "function": "saffron",
+    "Sys": {"g": 2.0, "Nucs": "1H", "A": [-1.0, -1.0, 2.5]},
+    "Exp": {"Field": 350, "Sequence": "3pESEEM", "tau": 0.13, "dt": 0.008, "nPoints": 256},
+    "tol": 1e-6
+  }
+}
