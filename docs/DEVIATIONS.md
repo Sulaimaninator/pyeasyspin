@@ -165,7 +165,9 @@ purpose:
   - `garlic`, `salt`, `pepper`, `chili`, `saffron` return `(x, spectrum)`;
   - `vec2ang` returns `(phi, theta)`; `nargout=1` gives the stacked 2 x N array;
   - `eprload` returns `(Abscissa, Data, Parameters)`;
-  - `isotopologues` returns a single `Struct` for one isotopologue and a list otherwise.
+  - `isotopologues` returns a single `Struct` for one isotopologue and a list otherwise;
+  - row and column vectors come back as 1-D arrays (matrices keep MATLAB's layout);
+    `pyeasyspin.config.MatlabShapes = True` returns MATLAB's exact shapes.
 - **Plotting.** Nothing is plotted unless `plot=True` is passed; figures are static Matplotlib
   figures that also return their outputs. EasySpin's GUIs are not included (the esfit window, the
   `isotopes` browser). In `pulse` and `exciteprofile` the interactive checkboxes become a static

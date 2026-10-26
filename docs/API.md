@@ -12,9 +12,12 @@ explained in [DEVIATIONS.md](DEVIATIONS.md).
   EasySpin's behaviour depends on the number of requested outputs, the function takes `nargout=`.
 - Arguments that are not given are `None`, as with MATLAB's nargin. Numeric inputs may be Python
   lists or NumPy arrays.
-- Outputs keep MATLAB's shapes: a row vector is a 1 x N array, a matrix keeps MATLAB's layout. Cell
+- Row and column vectors are returned as 1-D arrays; matrices keep MATLAB's layout
+  (`pyeasyspin.config.MatlabShapes = True` returns MATLAB's exact 1 x N and N x 1 shapes). Cell
   arrays are `pyeasyspin._matlab.Cell` (a list in column-major order, with the MATLAB shape in
   `.mshape`); struct arrays are lists of `Struct`.
+- `from pyeasyspin import *` imports every public function together with `Struct`, `config` and
+  `parallel_map`, so scripts can call `pepper(Sys, Exp)` as in MATLAB.
 - Nothing is plotted unless `plot=True` is passed (EasySpin plots when called without outputs).
 - Indices that users see (transitions, sites, orientations) are 1-based, as in EasySpin.
 - Errors raise `ValueError` or `TypeError` with EasySpin's message text. The log level is

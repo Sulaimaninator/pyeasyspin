@@ -30,16 +30,29 @@ Numba compiles them.
 
 ## Example
 
+A script reads much like its MATLAB version:
+
 ```python
-import pyeasyspin as es
+from pyeasyspin import *
+import matplotlib.pyplot as plt
 
 # Nitroxide, rigid limit, X band
-Sys = es.Struct(g=[2.0088, 2.0061, 2.0027], Nucs='14N', A=[16, 16, 86], lwpp=[0, 0.3])
-Exp = es.Struct(mwFreq=9.5, Range=[328, 349], nPoints=2048)
+Sys = Struct()
+Sys.g = [2.0088, 2.0061, 2.0027]
+Sys.Nucs = '14N'
+Sys.A = [16, 16, 86]          # MHz
+Sys.lwpp = [0, 0.3]           # mT
 
-B, spc = es.pepper(Sys, Exp)              # field axis (mT) and first-derivative spectrum
-B, spc = es.pepper(Sys, Exp, plot=True)   # the same, plotted with Matplotlib
+Exp = Struct()
+Exp.mwFreq = 9.5              # GHz
+Exp.Range = [328, 349]        # mT
+
+B, spc = pepper(Sys, Exp)     # field axis (mT) and first-derivative spectrum
+plt.plot(B, spc)
 ```
+
+`import pyeasyspin as es` (then `es.pepper`, `es.Struct(g=2.0, lwpp=1.0)`, ...) works as well, and
+`pepper(Sys, Exp, plot=True)` plots the spectrum the way MATLAB's `pepper(Sys,Exp)` does.
 
 ## Speed
 
@@ -97,6 +110,9 @@ deprecated `esfit_legacy`, and installation and update helpers.
 - Structures are `pyeasyspin.Struct`, a `dict` with attribute access (`Sys.g` and `Sys['g']`).
 - Functions with several outputs return a tuple, in MATLAB's order. Where EasySpin's behaviour
   depends on the number of requested outputs, the function takes a `nargout` keyword.
+- Row and column vectors come back as 1-D NumPy arrays, so they plot and index like ordinary
+  vectors; matrices keep MATLAB's layout. `pyeasyspin.config.MatlabShapes = True` returns
+  MATLAB's exact 1 × N and N × 1 shapes instead.
 - EasySpin plots when a function is called without outputs; here that is `plot=True`.
 - Indices that users see (transitions, sites, ...) stay 1-based, as in EasySpin.
 - Random numbers come from NumPy, so most stochastic results (noise, trajectories) agree with
