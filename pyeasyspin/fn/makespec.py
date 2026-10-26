@@ -3,6 +3,7 @@ import warnings
 import numpy as np
 from .._registry import nout
 from .._mat import vec
+from .._matlab import fix
 
 
 @nout(-1)
@@ -22,7 +23,7 @@ def makespec(Range=None, nPoints=None, Positions=None, Amplitudes=None, nargout=
         raise ValueError('Range(2) must be larger than Range(1).')
     nPoints = int(nPoints)
     idx = (nPoints - 1) * (Positions - Range[0]) / (Range[1] - Range[0])
-    idx = 1 + np.fix(idx)
+    idx = 1 + fix(idx)
     out = (idx < 1) | (idx > nPoints)
     if np.any(out):
         warnings.warn('Some peaks fall outside the specified range.')

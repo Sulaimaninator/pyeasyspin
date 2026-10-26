@@ -7,6 +7,7 @@ from .._registry import F, nout
 from .._parallel import chunked
 from .._struct import Struct
 from .._mat import a2, vec, isempty, numel, isnumeric
+from .._matlab import fix
 from ..config import config
 from .resfreqs_matrix import _c, _d, _err, _any, _mif, _num, _called_from
 
@@ -892,7 +893,7 @@ def resfields(Sys=None, Exp=None, Opt=None, nargout=4):
         partlyNaN = np.any(np.isnan(Pdat), axis=1)
         x = np.zeros((int(Transitions[:, 0].max()), int(Transitions[:, 1].max())))
         np.add.at(x, (Transitions[:, 0].astype(int) - 1, Transitions[:, 1].astype(int) - 1), partlyNaN.astype(float))
-        nLoopPairs = int(np.sum(np.fix(x / 2)))
+        nLoopPairs = int(np.sum(fix(x / 2)))
         nChopped = int(np.sum(partlyNaN)) - nLoopPairs * 2
         if nLoopPairs > 0:
             F.logmsg(2, '  ## %2d transitions form %d looping pairs', nLoopPairs * 2, nLoopPairs)

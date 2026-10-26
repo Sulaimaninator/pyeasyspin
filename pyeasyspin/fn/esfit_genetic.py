@@ -4,6 +4,7 @@ import math
 import numpy as np
 
 from .._registry import F, nout
+from .._matlab import fix
 from .._struct import Struct
 from .._mat import isempty
 from .._parallel import prefetch, cpu_time
@@ -107,7 +108,7 @@ def esfit_genetic(fcn=None, lb=None, ub=None, FitOpt=None, rng=None):
         Balls = (0.5 + np.arange(P)) / P
         ParentsIdx = np.array([np.sum(Balls[k] > RouletteWheel) for k in range(P)])   # 1-based
         r = _rand(src, 2, P)
-        r = ParentsIdx[np.fix(P * r + 1).astype(int) - 1] - 1                         # 0-based rows
+        r = ParentsIdx[fix(P * r + 1).astype(int) - 1] - 1                         # 0-based rows
         d = 0.1
         a = _rand(src, 1, P)[0] * (1 + 2 * d) - d
         Offspring = np.empty((P, nParams))

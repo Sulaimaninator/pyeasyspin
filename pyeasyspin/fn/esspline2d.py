@@ -2,7 +2,7 @@
 import numpy as np
 
 from .._registry import F
-from .._matlab import unmkpp
+from .._matlab import unmkpp, fix
 
 
 def esspline2d(data=None, ri=None, ci=None, EndCon=None):
@@ -24,7 +24,7 @@ def esspline2d(data=None, ri=None, ci=None, EndCon=None):
         coefs = np.hstack([np.zeros((coefs.shape[0], 4 - k)), coefs])
     values = coefs.reshape((d, cL * 4), order='F').T
     sizeg[0] = cL * 4
-    ipoint = np.fix(points)
+    ipoint = fix(points)
     ipoint[0, ipoint[0, :] > cL] = cL
     ipoint[1, ipoint[1, :] > rL] = rL
     rpoint = points - ipoint

@@ -16,6 +16,11 @@ def round_half_away(x):
     """MATLAB round (half away from zero) for a scalar."""
     return math.copysign(math.floor(abs(x) + 0.5), x)
 
+def fix(x):
+    """MATLAB fix (round toward zero), returning floats as MATLAB returns doubles; replaces
+    numpy.fix, which NumPy deprecates."""
+    return np.trunc(np.asarray(x, dtype=float))[()]
+
 
 def colon(a, d, b):
     """MATLAB a:d:b as a 1-D array (MathWorks' colonop algorithm: symmetric about the midpoint,
@@ -161,7 +166,7 @@ def mkpp(breaks, coefs, d=1):
     coefs = np.asarray(coefs)
     l = breaks.size - 1
     dl = int(np.prod(np.atleast_1d(d))) * l
-    k = int(np.fix(coefs.size / dl + 100 * EPS))
+    k = int(fix(coefs.size / dl + 100 * EPS))
     if k <= 0 or k * dl != coefs.size:
         raise ValueError('mkpp: the number of coefficients does not match the breaks and the dimension.')
     return Struct(form='pp', breaks=breaks.reshape(1, -1), coefs=coefs.reshape((dl, k), order='F'),

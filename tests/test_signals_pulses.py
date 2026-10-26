@@ -56,7 +56,8 @@ def test_mlpsvd_sum_and_orientation():
     t = np.arange(256) * 0.01
     data = np.vstack([_sig(t), 0.5 * np.exp(0.2j) * _sig(t), -0.3 * _sig(t)])
     for method in ('kt', 'tls'):
-        y, p = F.mlpsvd(data, t, method, 'mdl', 'sum')
+        # a fixed order: on noise-free data the MDL choice depends on rounding (BLAS-dependent)
+        y, p = F.mlpsvd(data, t, method, 2, 'sum')
         assert np.max(np.abs(y - data)) < 1e-10
         assert np.allclose(p.frequency.ravel(), [-7, 3], atol=1e-9)
     y, p = F.mlpsvd(data.T, t, 'ss', 2)

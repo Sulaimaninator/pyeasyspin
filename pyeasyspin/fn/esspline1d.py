@@ -2,7 +2,7 @@
 import numpy as np
 
 from .._mat import vec
-from .._matlab import linspace, mkpp
+from .._matlab import linspace, mkpp, fix
 
 
 def esspline1d(y=None, EndCon=None, xx=None):
@@ -70,7 +70,7 @@ def esspline1d(y=None, EndCon=None, xx=None):
         nn = xxa.size
         xs = xxa.ravel(order='F')
     npp = x.size - 1
-    index = np.fix(xs)
+    index = fix(xs)
     index[index > npp] = npp
     xs = xs - index
     if nDims > 1:

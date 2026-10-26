@@ -1,6 +1,7 @@
 """Frequency domain axis"""
 import numpy as np
 from .._mat import vec
+from .._matlab import fix
 
 
 def fdaxis(*varargin):
@@ -15,5 +16,5 @@ def fdaxis(*varargin):
     else:
         raise ValueError('Wrong number of input arguments!')
     NyquistFrequency = 1 / (2 * dT)
-    UnitAxis = 2 / N * (np.arange(N) - np.fix(N / 2))
+    UnitAxis = 2 / N * (np.arange(N) - fix(N / 2))
     return (NyquistFrequency * UnitAxis).reshape(1, -1)
